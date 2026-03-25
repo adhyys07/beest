@@ -25,27 +25,31 @@
   const faqs = [
     {
       q: 'What is Beest?',
-      a: 'Beest is a Hack Club program where you can build your own Strandbeest and fly to the Netherlands to show it off to the creator of Strandbeests!'
+      a: 'Beest is a Hack Club hackathon/event in the Netherlands! Participants qualify by building any project and documenting the process, and those who qualify fly to the Netherlands to build their own beests (mechanical animals!). The event is themed around Strandbeests, a kinetic sculpture developed in the netherlands by Theo Jansen. Participants will have the opportunity to go to a strandbeest exhibit!'
     },
     {
       q: 'Who can participate?',
-      a: 'Anyone from ages 13-19 can participate - no experience required.'
+      a: 'Any teens 13-19 or in high school can participate. We can also provide flight stipends for international students to get to the event.'
     },
     {
       q: 'How much does it cost?',
-      a: 'Beest is completely free to participate in!'
+      a: 'Beest is completely free to participate in! All costs for the event are covered, including food, accomodation, day-off travel and merchandise. Additionally participants can earn stipends for visa application fees and flight costs.'
     },
     {
       q: 'Where and when does Beest take place?',
       a: '[TBD]'
     },
     {
+      q: 'How do I qualify?',
+      a: 'Build an open source coding or hardware project! Anything you can dream up is possible, just make the project you want to exist. Please don't AI generate the project, instead focus on making something fun, silly, useful to you or a project that forces you to learn something new. 40 hours of tracked work will automatically qualify you, and working for additional hours will contribute $10/hr toward your flight cost or visa application fees.'
+    },
+    {
       q: 'What should I bring?',
-      a: '[TBD]'
+      a: 'A laptop, a sleeping bag, clothes, a charger, a mobile phone... A more conclusive list will be sent out closer to the event.'
     },
     {
       q: 'Do I need prior engineering or building experience?',
-      a: 'No! Hack Club is all about learning by doing, so we welcome builders of all experience levels. We will provide resources and support to help you build your Strandbeest, and we can help you in the #beest channel on Slack!'
+      a: 'No! Hack Club is all about learning by doing, so we welcome builders of all experience levels. We will provide resources and support to help you build your mechanical animal, and we can help you in the #beest channel on Slack!'
     },
     {
       q: 'What is a Strandbeest?',
@@ -83,7 +87,7 @@
   </svg>
 
   <h1>Frequently Asked Questions</h1>
-  <p class="faq-intro">Got questions about Beest? We've got answers. If you need more help, hop into the Beest channel on Hack Club Slack or email euan@hackclub.com</p>
+  <p class="faq-intro">I'm sure you have lots of questions! Below is the most common ones I see, but if you need more help please email euan@hackclub.com or use the dedicated slack channel #beest-help</p>
 
   <div class="faq-list">
     {#each faqs as faq, i (faq.q)}
