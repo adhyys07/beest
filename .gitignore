@@ -10,3 +10,7 @@ dist
 # OS
 .DS_Store
 Thumbs.db
+
+# Editor/tool configs
+.vscode/
+.claude/
