@@ -37,6 +37,11 @@
     updateTop();
     window.addEventListener('resize', updateTop);
 
+    // Lazy-load the tile texture after first paint
+    const tileImg = new Image();
+    tileImg.src = '/images/tile.webp';
+    tileImg.onload = () => document.documentElement.classList.add('tile-loaded');
+
     return () => {
       observer.disconnect();
       window.removeEventListener('resize', updateTop);
@@ -140,7 +145,15 @@
 <div class="top-bg">
 <div class="hero-wrap">
   <div class="hero-img-wrap">
-    <img src="/images/hero.webp" alt="Hero" class="hero-image" />
+    <img
+      srcset="/images/hero-640w.webp 640w, /images/hero-1024w.webp 1024w, /images/hero-1440w.webp 1440w, /images/hero.webp 4800w"
+      sizes="100vw"
+      src="/images/hero-1440w.webp"
+      alt="Hero"
+      class="hero-image"
+      fetchpriority="high"
+      decoding="async"
+    />
     <svg class="hero-strata" viewBox="0 0 1440 80" preserveAspectRatio="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
       <polygon points="0,38 60,35 120,40 180,32 240,28 300,25 340,30 380,26 440,22 500,26 560,30 620,24 680,28 720,35 780,40 840,44 880,40 940,46 1000,50 1060,46 1100,42 1140,48 1200,52 1260,48 1300,44 1340,50 1400,46 1440,42 1440,80 0,80" fill="#4b4840" />
     </svg>
@@ -241,7 +254,7 @@
 <section class="sticker-row">
   <div class="diagram" bind:this={diagramEl} style="--r:{annotate}">
     <div class="sticker">
-      <img src="/images/beest.gif" alt="Strandbeest animation" loading="lazy" decoding="async" />
+      <img src="/images/beest.webp" alt="Strandbeest animation" loading="lazy" decoding="async" />
     </div>
 
     <div class="callout c1" class:visible={showA}>
@@ -641,9 +654,20 @@
     pointer-events: none;
     opacity: 0.08;
     mix-blend-mode: overlay;
-    background-image: url('/images/tile.webp');
     background-size: 512px 512px;
     background-repeat: repeat;
+  }
+
+  :global(.tile-loaded) .top-bg::after,
+  :global(.tile-loaded) .what-is-this::after,
+  :global(.tile-loaded) .info-bg::after,
+  :global(.tile-loaded) .sticker-bg::after,
+  :global(.tile-loaded) .carousel-section::after,
+  :global(.tile-loaded) .hackclub-section::after,
+  :global(.tile-loaded) .bottom-rsvp::after,
+  :global(.tile-loaded) .rock-strata::after,
+  :global(.tile-loaded) .site-footer::after {
+    background-image: url('/images/tile.webp');
   }
 
   /* ── rock strata ────────────────────────────────── */
