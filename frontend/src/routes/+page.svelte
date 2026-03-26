@@ -931,11 +931,6 @@
 
   .rsvp-box button.valid:hover {
     background: #d4918f;
-    transform: scale(1.03);
-  }
-
-  .rsvp-box button.valid:active {
-    transform: scale(0.97);
   }
 
   .rsvp-box button.sending {
@@ -946,7 +941,7 @@
 
   .rsvp-error {
     margin: 8px 0 0;
-    color: #e05550;
+    color: #000000;
     font-size: 14px;
   }
 
