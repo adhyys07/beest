@@ -15,7 +15,12 @@
 <script lang="ts">
   import { onMount } from 'svelte';
 
+  let { data } = $props();
+  const authenticated = data.authenticated;
+
   let scrollY = $state(0);
+  let showScrollHint = $state(false);
+  const scrollHintVisible = $derived(showScrollHint && scrollY < 10);
   const PARALLAX_TRAVEL = 500;
   const pxRemaining = $derived(PARALLAX_TRAVEL - Math.min(scrollY, PARALLAX_TRAVEL));
   const postScroll = $derived(Math.max(scrollY - PARALLAX_TRAVEL, 0));
@@ -41,6 +46,8 @@
     updateTop();
     window.addEventListener('resize', updateTop);
 
+    const hintTimer = setTimeout(() => { showScrollHint = true; }, 3000);
+
     // Lazy-load the tile texture after first paint
     const tileImg = new Image();
     tileImg.src = '/images/tile.webp';
@@ -49,6 +56,7 @@
     return () => {
       observer.disconnect();
       window.removeEventListener('resize', updateTop);
+      clearTimeout(hintTimer);
     };
   });
 
@@ -99,8 +107,6 @@
 
   let topEmail = $state('');
   let bottomEmail = $state('');
-  let topUpdates = $state(true);
-  let bottomUpdates = $state(true);
   let topStatus = $state<'idle' | 'sending' | 'error'>('idle');
   let bottomStatus = $state<'idle' | 'sending' | 'error'>('idle');
 
@@ -121,6 +127,22 @@
 
     // Navigate to server endpoint — it handles state, cookies, and redirect
     window.location.href = `/api/auth/login?email=${encodeURIComponent(cleaned)}`;
+  }
+
+  async function submitAuthenticatedRsvp(
+    setStatus: (s: 'idle' | 'sending' | 'error') => void
+  ) {
+    setStatus('sending');
+    try {
+      const res = await fetch('/api/auth/rsvp', { method: 'POST' });
+      if (res.ok) {
+        window.location.href = '/home';
+      } else {
+        setStatus('error');
+      }
+    } catch {
+      setStatus('error');
+    }
   }
 
   const shopItems = [
@@ -149,6 +171,17 @@
 <div class="top-bg">
 <div class="hero-scroll-space">
 <div class="hero-wrap">
+  <div class="hero-mobile">
+    <img
+      src="/images/hero-1024w.webp"
+      alt="Hero"
+      fetchpriority="high"
+      decoding="async"
+    />
+    <svg class="hero-strata" viewBox="0 0 1440 80" preserveAspectRatio="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+      <polygon points="0,38 60,35 120,40 180,32 240,28 300,25 340,30 380,26 440,22 500,26 560,30 620,24 680,28 720,35 780,40 840,44 880,40 940,46 1000,50 1060,46 1100,42 1140,48 1200,52 1260,48 1300,44 1340,50 1400,46 1440,42 1440,80 0,80" fill="#4b4840" />
+    </svg>
+  </div>
   <div class="hero-parallax" bind:clientHeight={heroHeight}>
     {#each [
       { src: '/images/beest/1.webp', x: 0, rot: 0, scale: 0, drift: 0 },
@@ -181,6 +214,11 @@
     <h1 class="hero-title">#BEEST</h1>
     <p class="hero-subtitle">{subtitleText}<span class="cursor">|</span></p>
   </div>
+  <div class="scroll-hint" class:visible={scrollHintVisible}>
+    <svg width="44" height="44" viewBox="0 0 24 24" fill="none" stroke="#e6f4fe" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+      <path d="M12 5v14M5 12l7 7 7-7" />
+    </svg>
+  </div>
 </div>
 </div>
 
@@ -188,41 +226,51 @@
   <div class="cta-group">
     <div class="cta-sticker">
       <img src="/images/sticker.webp" alt="Beest sticker" loading="lazy" decoding="async" />
+      <span class="sticker-label">#BEEST</span>
     </div>
     <div class="cta-content">
       {#if dutch}
-        <p class="cta-line">RSVP VÓÓR DE</p>
-        <p class="cta-line">LANCERING,</p>
+        <p class="cta-line">MELD JE</p>
+        <p class="cta-line">VANDAAG AAN,</p>
         <p class="cta-line">KRIJG EEN</p>
         <p class="cta-line"><span bind:this={freeEl} class:rainbow={freeVisible} style="--i:0">G</span><span class:rainbow={freeVisible} style="--i:1">R</span><span class:rainbow={freeVisible} style="--i:2">A</span><span class:rainbow={freeVisible} style="--i:3">T</span><span class:rainbow={freeVisible} style="--i:4">I</span><span class:rainbow={freeVisible} style="--i:5">S</span></p>
         <p class="cta-line">STICKERS</p>
       {:else}
-        <p class="cta-line">RSVP before</p>
-        <p class="cta-line">launch,</p>
+        <p class="cta-line">Sign up</p>
+        <p class="cta-line">today,</p>
         <p class="cta-line">get a <span bind:this={freeEl} class:rainbow={freeVisible} style="--i:0">f</span><span class:rainbow={freeVisible} style="--i:1">r</span><span class:rainbow={freeVisible} style="--i:2">e</span><span class:rainbow={freeVisible} style="--i:3">e</span></p>
         <p class="cta-line">sticker</p>
       {/if}
     </div>
   </div>
-  <aside class="rsvp-box" aria-label="RSVP">
+  <aside class="rsvp-box" aria-label="Sign Up">
     <svg class="rsvp-border" preserveAspectRatio="none"><rect x="1.5" y="1.5" width="calc(100% - 3px)" height="calc(100% - 3px)" rx="0" ry="0" /></svg>
-    <h2>RSVP</h2>
-    <input type="email" placeholder="you@example.com" aria-label="Email" bind:value={topEmail} />
-    <button
-      type="button"
-      class="rsvp-btn"
-      class:valid={topValid}
-      class:sending={topStatus === 'sending'}
-      disabled={!topValid || topStatus === 'sending'}
-      onclick={() => submitRsvp(topEmail, (s) => topStatus = s)}
-    >
-      {#if topStatus === 'sending'}Sending...{:else}RSVP{/if}
-    </button>
+    <h2>Sign Up / Log In</h2>
+    {#if authenticated}
+      <button
+        type="button"
+        class="rsvp-btn valid"
+        class:sending={topStatus === 'sending'}
+        disabled={topStatus === 'sending'}
+        onclick={() => submitAuthenticatedRsvp((s) => topStatus = s)}
+      >
+        {#if topStatus === 'sending'}Sending...{:else}Start{/if}
+      </button>
+    {:else}
+      <input type="email" placeholder="you@example.com" aria-label="Email" bind:value={topEmail} onkeydown={(e) => { if (e.key === 'Enter' && topValid && topStatus !== 'sending') submitRsvp(topEmail, (s) => topStatus = s); }} />
+      <button
+        type="button"
+        class="rsvp-btn"
+        class:valid={topValid}
+        class:sending={topStatus === 'sending'}
+        disabled={!topValid || topStatus === 'sending'}
+        onclick={() => submitRsvp(topEmail, (s) => topStatus = s)}
+      >
+        {#if topStatus === 'sending'}Sending...{:else}Sign Up{/if}
+      </button>
+    {/if}
     {#if topStatus === 'error'}<p class="rsvp-error">Something went wrong, please try again.</p>{/if}
-    <label class="updates">
-      <input type="checkbox" bind:checked={topUpdates} />
-      <span>recieve email updates</span>
-    </label>
+    <p class="updates">&#10003; Signing up puts you on our email list, you can remove yourself <a href="https://email-tools.hackclub.com/" target="_blank" rel="noreferrer">here</a>.</p>
     <p class="rsvp-note">
       We will ask for an address to send the stickers to, Please use a real address or opt out since we send real stickers! You can always
       <a href="https://hackclub.com/privacy-and-terms/" target="_blank" rel="noreferrer">view our privacy policy</a>.
@@ -403,25 +451,34 @@
 
 <section class="bottom-rsvp">
   <div class="bottom-rsvp-inner">
-    <aside class="rsvp-box" aria-label="RSVP">
+    <aside class="rsvp-box" aria-label="Sign Up">
       <svg class="rsvp-border" preserveAspectRatio="none"><rect x="1.5" y="1.5" width="calc(100% - 3px)" height="calc(100% - 3px)" rx="0" ry="0" /></svg>
-      <h2>RSVP</h2>
-      <input type="email" placeholder="you@example.com" aria-label="Email" bind:value={bottomEmail} />
-      <button
-        type="button"
-        class="rsvp-btn"
-        class:valid={bottomValid}
-        class:sending={bottomStatus === 'sending'}
-        disabled={!bottomValid || bottomStatus === 'sending'}
-        onclick={() => submitRsvp(bottomEmail, (s) => bottomStatus = s)}
-      >
-        {#if bottomStatus === 'sending'}Sending...{:else}RSVP{/if}
-      </button>
+      <h2>Sign Up / Log In</h2>
+      {#if authenticated}
+        <button
+          type="button"
+          class="rsvp-btn valid"
+          class:sending={bottomStatus === 'sending'}
+          disabled={bottomStatus === 'sending'}
+          onclick={() => submitAuthenticatedRsvp((s) => bottomStatus = s)}
+        >
+          {#if bottomStatus === 'sending'}Sending...{:else}Start{/if}
+        </button>
+      {:else}
+        <input type="email" placeholder="you@example.com" aria-label="Email" bind:value={bottomEmail} onkeydown={(e) => { if (e.key === 'Enter' && bottomValid && bottomStatus !== 'sending') submitRsvp(bottomEmail, (s) => bottomStatus = s); }} />
+        <button
+          type="button"
+          class="rsvp-btn"
+          class:valid={bottomValid}
+          class:sending={bottomStatus === 'sending'}
+          disabled={!bottomValid || bottomStatus === 'sending'}
+          onclick={() => submitRsvp(bottomEmail, (s) => bottomStatus = s)}
+        >
+          {#if bottomStatus === 'sending'}Sending...{:else}Sign Up{/if}
+        </button>
+      {/if}
       {#if bottomStatus === 'error'}<p class="rsvp-error">Something went wrong, please try again.</p>{/if}
-      <label class="updates">
-        <input type="checkbox" bind:checked={bottomUpdates} />
-        <span>recieve email updates</span>
-      </label>
+      <p class="updates">&#10003; Signing up puts you on our email list, you can remove yourself <a href="https://email-tools.hackclub.com/" target="_blank" rel="noreferrer">here</a>.</p>
       <p class="rsvp-note">
         We will ask for an address to send the stickers to, Please use a real address or opt out since we send real stickers! You can always
         <a href="https://hackclub.com/privacy-and-terms/" target="_blank" rel="noreferrer">view our privacy policy</a>.
@@ -572,11 +629,43 @@
     position: relative;
   }
 
+  .hero-mobile {
+    display: none;
+    position: relative;
+    line-height: 0;
+  }
+
+  .hero-mobile img {
+    display: block;
+    width: 100%;
+    height: auto;
+  }
+
   .hero-wrap {
     position: sticky;
     top: 0;
     line-height: 0;
     z-index: 1;
+  }
+
+  .scroll-hint {
+    position: absolute;
+    bottom: -110px;
+    right: 48px;
+    z-index: 13;
+    opacity: 0;
+    transition: opacity 0.6s ease;
+    animation: bounce-arrow 1.5s ease-in-out infinite;
+    pointer-events: none;
+  }
+
+  .scroll-hint.visible {
+    opacity: 0.8;
+  }
+
+  @keyframes bounce-arrow {
+    0%, 100% { transform: translateY(0); }
+    50% { transform: translateY(8px); }
   }
 
   .hero-parallax {
@@ -660,6 +749,7 @@
     margin: 0;
     padding: 0;
     background-color: #47453f;
+    filter: saturate(1.5);
   }
 
   .saturate-wrap {
@@ -678,7 +768,7 @@
     margin-top: -1px;
   }
 
-  .top-bg::after,
+  .sticker-cta::after,
   .what-is-this::after,
   .info-bg::after,
   .sticker-bg::after,
@@ -691,13 +781,22 @@
     position: absolute;
     inset: 0;
     pointer-events: none;
-    opacity: 0.08;
+    opacity: 0.12;
     mix-blend-mode: overlay;
     background-size: 512px 512px;
     background-repeat: repeat;
   }
 
-  :global(.tile-loaded) .top-bg::after,
+  .sticker-cta::after {
+    left: 50%;
+    right: auto;
+    width: 100vw;
+    transform: translateX(-50%);
+    -webkit-mask-image: linear-gradient(to bottom, transparent, black 200px);
+    mask-image: linear-gradient(to bottom, transparent, black 200px);
+  }
+
+  :global(.tile-loaded) .sticker-cta::after,
   :global(.tile-loaded) .what-is-this::after,
   :global(.tile-loaded) .info-bg::after,
   :global(.tile-loaded) .sticker-bg::after,
@@ -728,6 +827,7 @@
 
   /* ── sign-up CTA ─────────────────────────────────── */
   .sticker-cta {
+    position: relative;
     display: flex;
     align-items: flex-start;
     justify-content: center;
@@ -754,12 +854,15 @@
     display: flex;
     align-items: center;
     justify-content: center;
-    filter: drop-shadow(10px 12px 16px rgba(0, 0, 0, 0.45));
+    background: #ffffff;
+    border-radius: 48px;
+    overflow: hidden;
+    box-shadow: 10px 12px 16px rgba(0, 0, 0, 0.45);
     animation: sticker-wiggle 3s ease-in-out infinite;
   }
 
   .cta-sticker:hover {
-    animation-play-state: paused;
+    animation-play-state: running;
   }
 
   @keyframes sticker-wiggle {
@@ -769,9 +872,22 @@
 
   .cta-sticker img {
     display: block;
-    width: 85%;
-    height: 85%;
+    width: 105%;
+    height: 105%;
     object-fit: contain;
+    filter: saturate(1.4);
+  }
+
+  .sticker-label {
+    position: absolute;
+    bottom: 20px;
+    left: 24px;
+    font-family: "Stone Breaker", "Courier New", monospace;
+    font-size: 42px;
+    font-weight: 700;
+    color: #000000;
+    letter-spacing: 0.06em;
+    line-height: 1;
   }
 
   .cta-content {
@@ -929,6 +1045,7 @@
     flex: 0 0 380px;
     align-self: flex-start;
     box-sizing: border-box;
+    min-height: 420px;
     padding: 24px;
     background: #7f796d;
     border: none;
@@ -952,6 +1069,11 @@
     stroke-width: 3;
     stroke-dasharray: 20 12;
     animation: march 30s linear infinite;
+    animation-play-state: paused;
+  }
+
+  .rsvp-box:hover .rsvp-border rect {
+    animation-play-state: running;
   }
 
   @keyframes march {
@@ -998,13 +1120,13 @@
   }
 
   .rsvp-box button.valid {
-    background: #e05550;
+    background: #b5443f;
     color: #ffffff;
     cursor: pointer;
   }
 
   .rsvp-box button.valid:hover {
-    background: #d4918f;
+    background: #944039;
   }
 
   .rsvp-box button.sending {
@@ -1020,18 +1142,16 @@
   }
 
   .updates {
-    margin-top: 14px;
-    display: flex;
-    align-items: center;
-    gap: 10px;
-    color: #4b4840;
-    font-size: 16px;
+    margin: 14px 0 0;
+    color: #e6f4fe;
+    font-size: 14px;
+    line-height: 1.4;
   }
 
-  .updates input[type='checkbox'] {
-    width: 18px;
-    height: 18px;
-    accent-color: #c48382;
+  .updates a,
+  .updates a:visited {
+    color: #93b4cd;
+    text-decoration: underline;
   }
 
   .rsvp-note {
@@ -1136,7 +1256,7 @@
 
   .c2::before {
     width: 230px;
-    right: 100%;
+    right: 100%;  
     top: 20px;
   }
 
@@ -1235,7 +1355,7 @@
     border: 1px solid #4b4840;
     box-shadow: 6px 6px 0 #4b4840;
     padding: 12px 12px 10px;
-    filter: none;
+    filter: saturate(0.667);
   }
 
   .bg-card {
@@ -1650,6 +1770,26 @@
   }
 
   @media (max-width: 900px) {
+    .hero-mobile {
+      display: block;
+    }
+
+    .hero-scroll-space {
+      height: auto;
+    }
+
+    .hero-wrap {
+      position: relative;
+    }
+
+    .hero-parallax {
+      display: none;
+    }
+
+    .scroll-hint {
+      display: none;
+    }
+
     .hackclub-section {
       padding: 40px 20px 0;
     }
