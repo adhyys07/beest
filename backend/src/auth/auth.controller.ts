@@ -21,21 +21,12 @@ export class AuthController {
     private readonly rsvpService: RsvpService,
   ) {}
 
-  /**
-   * Generates OAuth state and authorization URL.
-   * The proxy layer stores `state` in an httpOnly cookie and redirects to `url`.
-   */
   @Throttle({ default: { limit: 10, ttl: 60000 } })
   @Post('start')
   start(@Body() body: { email?: string }) {
     return this.authService.startAuth(body.email);
   }
 
-  /**
-   * Handles the full OAuth callback: state verification, code exchange,
-   * RSVP submission, JWT issuance, and redirect target.
-   * The proxy layer stores `token` in an httpOnly cookie and redirects to `redirectTo`.
-   */
   @Throttle({ default: { limit: 10, ttl: 60000 } })
   @Post('handle-callback')
   async handleCallback(
@@ -64,17 +55,27 @@ export class AuthController {
   }
 
   /**
-   * Returns the authenticated user's claims from their JWT.
+   * Exchange a refresh token for a new JWT + rotated refresh token.
    */
+  @Throttle({ default: { limit: 10, ttl: 60000 } })
+  @Post('refresh')
+  async refresh(@Body() body: { refreshToken: string }) {
+    if (!body.refreshToken) {
+      throw new BadRequestException('Refresh token is required');
+    }
+    try {
+      return await this.authService.refreshAuth(body.refreshToken);
+    } catch {
+      throw new UnauthorizedException('Invalid refresh token');
+    }
+  }
+
   @UseGuards(JwtAuthGuard)
   @Get('me')
   me(@Req() req: Request) {
     return (req as any).user;
   }
 
-  /**
-   * RSVP using the authenticated user's email from their JWT.
-   */
   @UseGuards(JwtAuthGuard)
   @Post('rsvp')
   async rsvpFromSession(@Req() req: Request) {
@@ -86,10 +87,13 @@ export class AuthController {
   }
 
   /**
-   * Clears the auth session. The proxy layer should delete the auth_token cookie.
+   * Invalidates the session's refresh token. The proxy clears cookies.
    */
   @Post('logout')
-  logout() {
+  async logout(@Body() body: { refreshToken?: string }) {
+    if (body.refreshToken) {
+      await this.authService.invalidateSession(body.refreshToken);
+    }
     return { success: true };
   }
 }

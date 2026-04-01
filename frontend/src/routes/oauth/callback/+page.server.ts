@@ -32,17 +32,25 @@ export const load: PageServerLoad = async ({ url, cookies }) => {
 		return { error: 'Authentication failed' };
 	}
 
-	const { token, redirectTo } = await res.json();
+	const { token, refreshToken, redirectTo } = await res.json();
 
-	// Store the backend-issued JWT in an httpOnly cookie
-	cookies.set('auth_token', token, {
+	const cookieOpts = {
 		path: '/',
 		httpOnly: true,
-		sameSite: 'lax',
-		secure: env.NODE_ENV === 'production',
-		maxAge: 60 * 60 * 24 * 7
+		sameSite: 'lax' as const,
+		secure: env.NODE_ENV === 'production'
+	};
+
+	// Store JWT (1h) and refresh token (90d) in httpOnly cookies
+	cookies.set('auth_token', token, { ...cookieOpts, maxAge: 3600 });
+	cookies.set('refresh_token', refreshToken, {
+		...cookieOpts,
+		maxAge: 90 * 24 * 60 * 60
 	});
 
-	// Redirect to wherever the backend told us
+	// Defense-in-depth: only follow relative redirects
+	if (typeof redirectTo !== 'string' || !redirectTo.startsWith('/') || redirectTo.startsWith('//')) {
+		redirect(302, '/home');
+	}
 	redirect(302, redirectTo);
 };

@@ -1,13 +1,19 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { JwtService } from '@nestjs/jwt';
-import { createHmac, timingSafeEqual } from 'crypto';
+import { InjectRepository } from '@nestjs/typeorm';
+import { Repository } from 'typeorm';
+import { createHash, createHmac, randomBytes, timingSafeEqual } from 'crypto';
 import { RsvpService } from '../rsvp/rsvp.service';
+import { User } from '../entities/user.entity';
+import { Session } from '../entities/session.entity';
 
 const ALLOWED_REDIRECTS = new Set(['/home', '/tutorial']);
 
 const EMAIL_RE =
   /^[a-zA-Z0-9.!#$%&'*+/=?^_`{|}~-]+@[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?(?:\.[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?)*$/;
+
+const REFRESH_TOKEN_EXPIRY_MS = 90 * 24 * 60 * 60 * 1000; // 90 days
 
 @Injectable()
 export class AuthService {
@@ -22,7 +28,6 @@ export class AuthService {
   private readonly tokenUrl = 'https://auth.hackclub.com/oauth/token';
   private readonly userinfoUrl = 'https://auth.hackclub.com/oauth/userinfo';
 
-  // Standard OIDC scopes + Hack Club custom scopes
   private readonly scopes = [
     'openid',
     'email',
@@ -39,6 +44,10 @@ export class AuthService {
     private configService: ConfigService,
     private jwtService: JwtService,
     private rsvpService: RsvpService,
+    @InjectRepository(User)
+    private userRepo: Repository<User>,
+    @InjectRepository(Session)
+    private sessionRepo: Repository<Session>,
   ) {
     this.clientId = this.configService.getOrThrow('CLIENT_ID');
     this.clientSecret = this.configService.getOrThrow('CLIENT_SECRET');
@@ -49,25 +58,17 @@ export class AuthService {
     this.jwtSecret = this.configService.getOrThrow('JWT_SECRET');
   }
 
-  /**
-   * HMAC-signs a state value so the backend can verify on callback
-   * that it issued the state — without trusting the proxy layer.
-   */
   private signState(state: string): string {
-    return createHmac('sha256', this.jwtSecret).update(state).digest('hex');
+    return createHmac('sha256', this.jwtSecret)
+      .update(`hca:${state}`)
+      .digest('hex');
   }
 
-  /**
-   * Generates the OAuth state and authorization URL.
-   * The state sent to Hack Club is `UUID.HMAC` (signed).
-   * The proxy stores the raw UUID in an httpOnly cookie.
-   */
   startAuth(email?: string): { url: string; state: string } {
     const state = crypto.randomUUID();
     const signature = this.signState(state);
     const signedState = `${state}.${signature}`;
 
-    // Validate email format before using as login_hint
     const sanitizedEmail =
       email && EMAIL_RE.test(email.trim()) ? email.trim() : undefined;
 
@@ -89,19 +90,11 @@ export class AuthService {
     };
   }
 
-  /**
-   * Handles the full OAuth callback:
-   *  1. Verifies state via HMAC + constant-time comparison
-   *  2. Exchanges authorization code for tokens
-   *  3. Fetches user info from Hack Club
-   *  4. Submits RSVP
-   *  5. Returns JWT + redirect path
-   */
   async handleCallback(
     code: string,
     returnedSignedState: string,
     cookieState: string,
-  ): Promise<{ token: string; redirectTo: string }> {
+  ): Promise<{ token: string; refreshToken: string; redirectTo: string }> {
     // 1. Verify state
     const dotIndex = returnedSignedState.lastIndexOf('.');
     if (dotIndex === -1) {
@@ -111,7 +104,6 @@ export class AuthService {
     const stateValue = returnedSignedState.substring(0, dotIndex);
     const signature = returnedSignedState.substring(dotIndex + 1);
 
-    // Constant-time comparison: cookie state vs state from OAuth callback
     const stateBuffer = Buffer.from(stateValue);
     const cookieBuffer = Buffer.from(cookieState);
     if (
@@ -121,7 +113,6 @@ export class AuthService {
       throw new Error('State mismatch');
     }
 
-    // Verify HMAC — proves this backend issued the state
     const expectedSignature = this.signState(stateValue);
     const sigBuffer = Buffer.from(signature);
     const expectedBuffer = Buffer.from(expectedSignature);
@@ -164,9 +155,11 @@ export class AuthService {
 
     const userinfo = await userinfoResponse.json();
 
-    // 4. Submit RSVP using the HCA-validated email — never the user-entered one
-    let redirectTo = '/home';
+    // 4. Upsert user in DB
+    const user = await this.upsertUser(userinfo);
 
+    // 5. Submit RSVP
+    let redirectTo = '/home';
     try {
       const rsvpResult = await this.rsvpService.createRsvp(userinfo.email);
       redirectTo = rsvpResult.existing ? '/home' : '/tutorial';
@@ -174,30 +167,109 @@ export class AuthService {
       this.logger.error(
         `RSVP submission failed for user ${userinfo.sub}: ${err}`,
       );
-      // Auth succeeded — don't block the user over a failed RSVP
     }
 
-    // Validate redirectTo against allowlist
     if (!ALLOWED_REDIRECTS.has(redirectTo)) {
       redirectTo = '/home';
     }
 
-    // 5. Sign JWT with user's own claims (visible only to them)
+    // 6. Create session with refresh token
+    const refreshToken = await this.createSession(user.id);
+
+    // 7. Sign JWT — no PII beyond what's needed for display + auth checks
     const token = this.jwtService.sign({
       sub: userinfo.sub,
+      uid: user.id,
       email: userinfo.email,
       name: userinfo.name,
       nickname: userinfo.nickname,
-      birthdate: userinfo.birthdate,
-      address: userinfo.address,
       slack_id: userinfo.slack_id,
-      verification_status: userinfo.verification_status,
     });
 
-    return { token, redirectTo };
+    return { token, refreshToken, redirectTo };
+  }
+
+  /**
+   * Validates a refresh token, rotates it, and issues a new JWT.
+   */
+  async refreshAuth(
+    refreshToken: string,
+  ): Promise<{ token: string; refreshToken: string }> {
+    const hash = createHash('sha256').update(refreshToken).digest('hex');
+    const session = await this.sessionRepo.findOne({
+      where: { refreshTokenHash: hash },
+      relations: ['user'],
+    });
+
+    if (!session || session.expiresAt < new Date()) {
+      if (session) await this.sessionRepo.remove(session);
+      throw new Error('Invalid or expired refresh token');
+    }
+
+    const user = session.user;
+
+    // Rotate: delete old session, create new one
+    await this.sessionRepo.remove(session);
+    const newRefreshToken = await this.createSession(user.id);
+
+    const token = this.jwtService.sign({
+      sub: user.hcaSub,
+      uid: user.id,
+      email: user.email,
+      name: user.name,
+      nickname: user.nickname,
+      slack_id: user.slackId,
+    });
+
+    return { token, refreshToken: newRefreshToken };
+  }
+
+  /**
+   * Invalidates a refresh token (logout).
+   */
+  async invalidateSession(refreshToken: string): Promise<void> {
+    const hash = createHash('sha256').update(refreshToken).digest('hex');
+    await this.sessionRepo.delete({ refreshTokenHash: hash });
   }
 
   verifyToken(token: string): Record<string, unknown> {
     return this.jwtService.verify(token);
+  }
+
+  private async upsertUser(userinfo: Record<string, any>): Promise<User> {
+    let user = await this.userRepo.findOne({
+      where: { hcaSub: userinfo.sub },
+    });
+
+    if (user) {
+      user.email = userinfo.email;
+      user.name = userinfo.name;
+      user.nickname = userinfo.nickname;
+      user.slackId = userinfo.slack_id;
+    } else {
+      user = this.userRepo.create({
+        hcaSub: userinfo.sub,
+        email: userinfo.email,
+        name: userinfo.name,
+        nickname: userinfo.nickname,
+        slackId: userinfo.slack_id,
+      });
+    }
+
+    return this.userRepo.save(user);
+  }
+
+  private async createSession(userId: string): Promise<string> {
+    const refreshToken = randomBytes(48).toString('base64url');
+    const hash = createHash('sha256').update(refreshToken).digest('hex');
+
+    const session = this.sessionRepo.create({
+      userId,
+      refreshTokenHash: hash,
+      expiresAt: new Date(Date.now() + REFRESH_TOKEN_EXPIRY_MS),
+    });
+    await this.sessionRepo.save(session);
+
+    return refreshToken;
   }
 }

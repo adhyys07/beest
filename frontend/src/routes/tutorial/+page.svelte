@@ -2,6 +2,8 @@
   import { onMount, tick } from 'svelte';
   import { beforeNavigate } from '$app/navigation';
 
+  let { data } = $props();
+
   let scrollY = $state(0);
   let innerHeight = $state(800);
 
@@ -76,10 +78,13 @@
     .map((c, i) => `${c} ${(i / (skyColors.length - 1)) * 100}%`)
     .join(', ');
 
+  // Scroll indicator fades out as user starts scrolling up
+  const indicatorOpacity = $derived(Math.min(Math.max(1 - progress * 5, 0), 1));
+
   // Cloud rows at section boundaries — alternate left/right, embedded in page edge
   const numSections = skyColors.length;
   const clouds: { top: number; left: number; opacity: number }[] = [];
-  for (let i = 1; i < numSections - 1; i++) {
+  for (let i = 2; i < numSections - 1; i++) {
     const top = (i / numSections) * 100;
     const fromLeft = i % 2 === 1;
     clouds.push({ top, left: fromLeft ? -15 : 60, opacity: 0.6 });
@@ -226,6 +231,13 @@
       class="cloud cloud-right"
       style="transform: translate({translateX}vw, {translateY}vh) scale({scale});"
     />
+    {#if indicatorOpacity > 0}
+      <div class="scroll-indicator" style="opacity: {indicatorOpacity};">
+        <div class="scroll-arrow"></div>
+        <div class="scroll-arrow delay"></div>
+        <span class="scroll-label">Scroll up</span>
+      </div>
+    {/if}
   </div>
 </div>
 
@@ -246,8 +258,14 @@
       "
     />
   {/each}
+  <img
+    src="/images/cloud.webp"
+    alt=""
+    class="go-cloud"
+    style="top: {innerHeight + innerHeight * 0.35}px;"
+  />
   <!-- Section 0: Go! (top — last seen) -->
-  <div class="section-content" style="top: {innerHeight}px;">
+  <div class="section-content go-section" style="top: {innerHeight}px;">
     <h2 class="section-title">Go!</h2>
     <p class="section-paragraph">You're all set to build — community and prizes await you, but if you ever get stuck you can always replay this tutorial, read the <a href="/faq" class="section-link">FAQ</a> or ask in <a href="https://hackclub.enterprise.slack.com/archives/C0AQ4T1CWH2" target="_blank" rel="noopener" class="section-link">#beest-help</a> on Slack.</p>
   </div>
@@ -267,7 +285,13 @@
   <div class="section-content" style="top: {innerHeight * 3}px;">
     <h2 class="section-title">Connect Hackatime</h2>
     <p class="section-paragraph">Track your build time and unlock rewards by connecting Hackatime to your project.</p>
-    <button class="action-btn">Connect Hackatime</button>
+    {#if data.onboarding.hackatime}
+      <button class="action-btn complete-btn" onclick={() => goToSection(1)}>Complete! Move on?</button>
+    {:else}
+      <form method="POST" action="/api/auth/hackatime/start">
+        <button type="submit" class="action-btn">Connect Hackatime</button>
+      </form>
+    {/if}
   </div>
 
   <img
@@ -280,7 +304,11 @@
   <div class="section-content" style="top: {innerHeight * 4}px;">
     <h2 class="section-title">Join Slack</h2>
     <p class="section-paragraph">Join the Hack Club Slack to meet other builders, get help, and share your progress.</p>
-    <button class="action-btn">Join Slack</button>
+    {#if data.onboarding.slack}
+      <button class="action-btn complete-btn" onclick={() => goToSection(2)}>Complete! Move on?</button>
+    {:else}
+      <a href="https://hackclub.com/slack/" target="_blank" rel="noopener" class="action-btn">Join Slack</a>
+    {/if}
   </div>
   <div class="sky-hero">
     <img src="/images/beest2.webp" alt="" class="hero-beest" />
@@ -406,6 +434,49 @@
   }
 
 
+  /* ── Scroll indicator ── */
+  .scroll-indicator {
+    position: absolute;
+    bottom: 5vh;
+    left: 2rem;
+    z-index: 12;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 0.3rem;
+    pointer-events: none;
+  }
+
+  .scroll-arrow {
+    width: 1.8rem;
+    height: 1.8rem;
+    border-left: 5px solid white;
+    border-top: 5px solid white;
+    transform: rotate(45deg);
+    animation: bounce-up 1.6s ease-in-out infinite;
+    opacity: 0.8;
+  }
+
+  .scroll-arrow.delay {
+    animation-delay: 0.2s;
+    opacity: 0.5;
+  }
+
+  @keyframes bounce-up {
+    0%, 100% { transform: rotate(45deg) translateX(0) translateY(0); }
+    50% { transform: rotate(45deg) translateX(-6px) translateY(-6px); }
+  }
+
+  .scroll-label {
+    color: white;
+    font-size: 1.3rem;
+    font-weight: bold;
+    letter-spacing: 0.15em;
+    text-transform: uppercase;
+    margin-top: 0.8rem;
+    text-shadow: 0 2px 12px rgba(0, 0, 0, 0.7);
+  }
+
   .hidden {
     display: none !important;
   }
@@ -435,6 +506,16 @@
     width: 40vw;
     height: auto;
     z-index: 2;
+    pointer-events: none;
+  }
+
+  .go-cloud {
+    position: absolute;
+    left: 55%;
+    transform: translateX(-50%) translateY(-15%);
+    width: 80vw;
+    height: auto;
+    z-index: 1;
     pointer-events: none;
   }
 
@@ -485,6 +566,7 @@
     width: 55vw;
     height: auto;
     pointer-events: none;
+    z-index: 1;
   }
 
   .section-content {
@@ -506,6 +588,18 @@
     font-size: 2.5rem;
     margin-bottom: 2rem;
     text-align: center;
+  }
+
+  .go-section .section-title,
+  .go-section .section-paragraph,
+  .go-section .section-link {
+    color: black;
+    font-weight: bold;
+  }
+
+  .go-section .section-title,
+  .go-section .section-paragraph {
+    text-shadow: 0 2px 8px rgba(255, 255, 255, 0.8), 0 0 20px rgba(255, 255, 255, 0.5);
   }
 
   /* ── Your Projects ── */
@@ -581,6 +675,16 @@
 
   .action-btn:hover {
     background: #eee;
+  }
+
+  .complete-btn {
+    background: #4ade80;
+    color: #14532d;
+    font-weight: bold;
+  }
+
+  .complete-btn:hover {
+    background: #86efac;
   }
 
   .section-tabs {

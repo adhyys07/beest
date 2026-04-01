@@ -5,11 +5,20 @@ import type { RequestHandler } from './$types';
 const BACKEND_URL = env.BACKEND_URL ?? 'http://localhost:3001';
 
 export const POST: RequestHandler = async ({ cookies }) => {
-	// Tell the backend (for future server-side session cleanup)
-	await fetch(`${BACKEND_URL}/api/auth/logout`, { method: 'POST' });
+	const refreshToken = cookies.get('refresh_token');
 
-	// Clear the auth cookie
+	// Invalidate the session in the DB
+	if (refreshToken) {
+		await fetch(`${BACKEND_URL}/api/auth/logout`, {
+			method: 'POST',
+			headers: { 'Content-Type': 'application/json' },
+			body: JSON.stringify({ refreshToken })
+		});
+	}
+
+	// Clear both auth cookies
 	cookies.delete('auth_token', { path: '/' });
+	cookies.delete('refresh_token', { path: '/' });
 
 	redirect(302, '/');
 };
