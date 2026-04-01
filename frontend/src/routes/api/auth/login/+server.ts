@@ -8,13 +8,20 @@ export const GET: RequestHandler = async ({ url, cookies }) => {
 	const email = url.searchParams.get('email') ?? undefined;
 
 	// Ask the backend to generate state + authorize URL
-	const res = await fetch(`${BACKEND_URL}/api/auth/start`, {
-		method: 'POST',
-		headers: { 'Content-Type': 'application/json' },
-		body: JSON.stringify({ email })
-	});
+	let res: Response;
+	try {
+		res = await fetch(`${BACKEND_URL}/api/auth/start`, {
+			method: 'POST',
+			headers: { 'Content-Type': 'application/json' },
+			body: JSON.stringify({ email })
+		});
+	} catch (err) {
+		console.error('Failed to reach backend at', BACKEND_URL, err);
+		return new Response('Backend unreachable', { status: 502 });
+	}
 
 	if (!res.ok) {
+		console.error('Backend returned', res.status, await res.text().catch(() => ''));
 		return new Response('Failed to start auth', { status: 502 });
 	}
 
