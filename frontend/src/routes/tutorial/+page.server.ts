@@ -5,7 +5,7 @@ import type { PageServerLoad } from './$types';
 
 const BACKEND_URL = env.BACKEND_URL ?? 'http://localhost:3001';
 
-export const load: PageServerLoad = async ({ cookies }) => {
+export const load: PageServerLoad = async ({ url, cookies }) => {
 	const user = await getAuthenticatedUser(cookies);
 	if (!user) redirect(302, '/');
 
@@ -19,5 +19,7 @@ export const load: PageServerLoad = async ({ cookies }) => {
 		? await onboardingRes.json()
 		: { hackatime: false, slack: false, project: false };
 
-	return { user, onboarding };
+	const stage = url.searchParams.get('stage');
+
+	return { user, onboarding, stage: stage ? parseInt(stage, 10) : null };
 };

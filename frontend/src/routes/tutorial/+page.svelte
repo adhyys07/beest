@@ -7,6 +7,22 @@
   let scrollY = $state(0);
   let innerHeight = $state(800);
 
+  let slackStatus = $state(data.onboarding.slack);
+  let slackRefreshing = $state(false);
+
+  async function refreshSlack() {
+    slackRefreshing = true;
+    try {
+      const res = await fetch('/api/onboarding/status');
+      if (res.ok) {
+        const status = await res.json();
+        slackStatus = status.slack;
+      }
+    } finally {
+      slackRefreshing = false;
+    }
+  }
+
   // Scrollymation plays in reverse scroll direction — scroll UP to progress
   const scrollLength = $derived(innerHeight * 10);
   const maxScroll = $derived(innerHeight * 13);
@@ -156,8 +172,19 @@
     window.addEventListener('touchmove', blockScroll, { passive: false });
     window.addEventListener('keydown', blockKeys);
 
-    // Start at the bottom so user scrolls UP to play the scrollymation
-    window.scrollTo(0, innerHeight * 13);
+    if (data.stage != null) {
+      // Skip scrollymation and jump directly to the requested section
+      transitioned = true;
+      locked = true;
+      tick().then(() => {
+        if (skyEl) {
+          window.scrollTo(0, skyEl.offsetTop + sectionMultipliers[data.stage!] * innerHeight);
+        }
+      });
+    } else {
+      // Start at the bottom so user scrolls UP to play the scrollymation
+      window.scrollTo(0, innerHeight * 13);
+    }
 
     totalLength = pathEls.reduce((sum, p) => sum + p.getTotalLength(), 0);
     let cumulative = 0;
@@ -303,11 +330,27 @@
   <!-- Section 3: Join Slack (bottom — first seen after landing) -->
   <div class="section-content" style="top: {innerHeight * 4}px;">
     <h2 class="section-title">Join Slack</h2>
-    <p class="section-paragraph">Join the Hack Club Slack to meet other builders, get help, and share your progress.</p>
-    {#if data.onboarding.slack}
-      <button class="action-btn complete-btn" onclick={() => goToSection(2)}>Complete! Move on?</button>
+    {#if slackStatus === 'full_member'}
+      <p class="section-paragraph">It looks like you are already on the Hack Club Slack! We're so glad to have you :)</p>
+      <button class="action-btn complete-btn" onclick={() => goToSection(2)}>Move on</button>
+    {:else if slackStatus === 'guest'}
+      <p class="section-paragraph">It looks like you haven't fully joined our Slack, that's where the magic happens. Check your email, join the conversation and then try hitting refresh.</p>
+      <div class="slack-actions">
+        <a href="https://hackclub.com/slack/" target="_blank" rel="noopener" class="action-btn">Join Slack</a>
+        <button class="action-btn refresh-btn" disabled={slackRefreshing} onclick={refreshSlack}>
+          {slackRefreshing ? 'Checking...' : 'Refresh'}
+        </button>
+      </div>
+      <button class="skip-btn" onclick={() => goToSection(2)}>I'll do this later</button>
     {:else}
-      <a href="https://hackclub.com/slack/" target="_blank" rel="noopener" class="action-btn">Join Slack</a>
+      <p class="section-paragraph">Join the Hack Club Slack to meet other builders, get help, and share your progress.</p>
+      <div class="slack-actions">
+        <a href="https://hackclub.com/slack/" target="_blank" rel="noopener" class="action-btn">Join Slack</a>
+        <button class="action-btn refresh-btn" disabled={slackRefreshing} onclick={refreshSlack}>
+          {slackRefreshing ? 'Checking...' : 'Refresh'}
+        </button>
+      </div>
+      <button class="skip-btn" onclick={() => goToSection(2)}>I'll do this later</button>
     {/if}
   </div>
   <div class="sky-hero">
@@ -685,6 +728,42 @@
 
   .complete-btn:hover {
     background: #86efac;
+  }
+
+  .slack-actions {
+    display: flex;
+    gap: 1rem;
+    align-items: center;
+  }
+
+  .refresh-btn {
+    background: rgba(255, 255, 255, 0.15);
+    color: white;
+    border: 2px solid rgba(255, 255, 255, 0.4);
+    backdrop-filter: blur(8px);
+  }
+
+  .refresh-btn:hover:not(:disabled) {
+    background: rgba(255, 255, 255, 0.3);
+  }
+
+  .refresh-btn:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+  }
+
+  .skip-btn {
+    background: none;
+    border: none;
+    color: rgba(255, 255, 255, 0.5);
+    font-size: 0.9rem;
+    margin-top: 1rem;
+    cursor: pointer;
+    text-decoration: underline;
+  }
+
+  .skip-btn:hover {
+    color: rgba(255, 255, 255, 0.8);
   }
 
   .section-tabs {

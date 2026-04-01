@@ -144,7 +144,7 @@ export class HackatimeService {
     await this.userRepo.save(user);
     this.logger.log(`Hackatime connected for user ${userId}`);
 
-    return { success: true, redirectTo: '/tutorial' };
+    return { success: true, redirectTo: '/tutorial?stage=2' };
   }
 
   async isConnected(userId: string): Promise<boolean> {
