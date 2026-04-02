@@ -14,12 +14,13 @@
 <script lang="ts">
   import { resolve } from '$app/paths';
 
-  let scrollY = 0;
-  let openIndex: number | null = null;
+  let openIndex: number | null = $state(null);
 
   function toggle(i: number) {
     openIndex = openIndex === i ? null : i;
   }
+
+  let gearAngle = $derived(openIndex !== null ? (openIndex + 1) * 45 : 0);
 
 
   const faqs = [
@@ -62,28 +63,23 @@
   ];
 </script>
 
-<svelte:window bind:scrollY={scrollY} />
-
 <div class="faq-page">
-  <!-- Side gears — desktop only, half-embedded into edges -->
-  <svg class="side-gear side-gear-l1" style="transform: rotate({scrollY * 0.08}deg)" viewBox="0 0 100 100" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+  <!-- Side gears — desktop only, rotate based on open question -->
+  <svg class="side-gear side-gear-l1" style="transform: rotate({gearAngle * 0.5}deg)" viewBox="0 0 100 100" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
     <g fill="#6c6659"><circle cx="50" cy="50" r="30"/>{#each Array(8) as _, t (t)}<rect x="43" y="4" width="14" height="22" rx="3" transform="rotate({t*45} 50 50)"/>{/each}</g><circle cx="50" cy="50" r="12" fill="#4b4840"/>
   </svg>
-  <svg class="side-gear side-gear-l2" style="transform: rotate({-scrollY * 0.08 + 22.5}deg)" viewBox="0 0 100 100" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+  <svg class="side-gear side-gear-l2" style="transform: rotate({-gearAngle * 1.8 + 22.5}deg)" viewBox="0 0 100 100" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
     <g fill="#7f796d"><circle cx="50" cy="50" r="30"/>{#each Array(8) as _, t (t)}<rect x="43" y="4" width="14" height="22" rx="3" transform="rotate({t*45} 50 50)"/>{/each}</g><circle cx="50" cy="50" r="12" fill="#4b4840"/>
   </svg>
-  <svg class="side-gear side-gear-l3" style="transform: rotate({scrollY * 0.06}deg)" viewBox="0 0 100 100" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+  <svg class="side-gear side-gear-l3" style="transform: rotate({gearAngle * 2.5}deg)" viewBox="0 0 100 100" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
     <g fill="#6c6659"><circle cx="50" cy="50" r="30"/>{#each Array(8) as _, t (t)}<rect x="43" y="4" width="14" height="22" rx="3" transform="rotate({t*45} 50 50)"/>{/each}</g><circle cx="50" cy="50" r="12" fill="#4b4840"/>
   </svg>
 
-  <svg class="side-gear side-gear-r1" style="transform: rotate({-scrollY * 0.08}deg)" viewBox="0 0 100 100" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+  <svg class="side-gear side-gear-r1" style="transform: rotate({-gearAngle * 1.3}deg)" viewBox="0 0 100 100" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
     <g fill="#6c6659"><circle cx="50" cy="50" r="30"/>{#each Array(8) as _, t (t)}<rect x="43" y="4" width="14" height="22" rx="3" transform="rotate({t*45} 50 50)"/>{/each}</g><circle cx="50" cy="50" r="12" fill="#4b4840"/>
   </svg>
-  <svg class="side-gear side-gear-r2" style="transform: rotate({scrollY * 0.08 + 22.5}deg)" viewBox="0 0 100 100" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+  <svg class="side-gear side-gear-r2" style="transform: rotate({gearAngle * 0.3 + 22.5}deg)" viewBox="0 0 100 100" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
     <g fill="#7f796d"><circle cx="50" cy="50" r="30"/>{#each Array(8) as _, t (t)}<rect x="43" y="4" width="14" height="22" rx="3" transform="rotate({t*45} 50 50)"/>{/each}</g><circle cx="50" cy="50" r="12" fill="#4b4840"/>
-  </svg>
-  <svg class="side-gear side-gear-r3" style="transform: rotate({-scrollY * 0.06}deg)" viewBox="0 0 100 100" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
-    <g fill="#6c6659"><circle cx="50" cy="50" r="30"/>{#each Array(8) as _, t (t)}<rect x="43" y="4" width="14" height="22" rx="3" transform="rotate({t*45} 50 50)"/>{/each}</g><circle cx="50" cy="50" r="12" fill="#4b4840"/>
   </svg>
 
   <h1>Frequently Asked Questions</h1>
@@ -135,12 +131,13 @@
     padding: 0;
     background-color: #4b4840;
     filter: saturate(1.5);
+    overflow-x: hidden;
   }
 
   .faq-page {
     background: #4b4840;
     min-height: 100vh;
-    padding: 4rem 1.5rem;
+    padding: 2rem 1.5rem;
     position: relative;
     overflow-x: clip;
   }
@@ -257,7 +254,7 @@
   .back-btn {
     display: block;
     width: fit-content;
-    margin: 2.5rem auto 0;
+    margin: 1.5rem auto 0;
     padding: 0.75rem 2rem;
     font-family: "Stone Breaker", "Courier New", monospace;
     font-size: 1.3rem;
@@ -283,43 +280,40 @@
     pointer-events: none;
     width: 200px;
     height: 200px;
+    transition: transform 0.5s cubic-bezier(0.34, 1.56, 0.64, 1);
   }
 
-  /* Left side gears — half off the left edge */
+  /* Left side gears — embedded in the left edge */
   .side-gear-l1 {
-    left: -90px;
+    left: -115px;
     top: 10%;
   }
 
   .side-gear-l2 {
-    left: -100px;
+    left: -130px;
     top: 40%;
     width: 240px;
     height: 240px;
   }
 
   .side-gear-l3 {
-    left: -90px;
+    left: -115px;
     top: 72%;
   }
 
-  /* Right side gears — half off the right edge */
+  /* Right side gears — embedded in the right edge */
   .side-gear-r1 {
-    right: -90px;
+    right: -115px;
     top: 20%;
   }
 
   .side-gear-r2 {
-    right: -100px;
+    right: -130px;
     top: 53%;
     width: 240px;
     height: 240px;
   }
 
-  .side-gear-r3 {
-    right: -90px;
-    top: 80%;
-  }
 
   @media (max-width: 600px) {
     .side-gear {

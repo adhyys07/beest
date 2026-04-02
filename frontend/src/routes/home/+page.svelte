@@ -18,6 +18,46 @@
 
   let activeSection = $state('projects');
   let tileLoaded = $state(false);
+  let creatingProject = $state(false);
+
+  let projectName = $state('');
+  let projectDesc = $state('');
+  let projectType = $state('');
+  let codeUrl = $state('');
+  let demoUrl = $state('');
+  let readmeUrl = $state('');
+  let screenshotFiles = $state<(File | null)[]>([null, null]);
+  let screenshotPreviews = $state<string[]>(['', '']);
+  let hackatimeProject = $state('');
+  let focusedField = $state(0);
+
+  function openCreateProject() {
+    creatingProject = true;
+  }
+
+  function cancelCreateProject() {
+    creatingProject = false;
+    projectName = '';
+    projectDesc = '';
+    projectType = '';
+    codeUrl = '';
+    demoUrl = '';
+    readmeUrl = '';
+    screenshotFiles = [null, null];
+    screenshotPreviews = ['', ''];
+    hackatimeProject = '';
+  }
+
+  function handleScreenshot(e: Event) {
+    const input = e.target as HTMLInputElement;
+    const file = input.files?.[0];
+    if (file) {
+      const idx = screenshotPreviews[0] === '' ? 0 : 1;
+      screenshotFiles[idx] = file;
+      screenshotPreviews[idx] = URL.createObjectURL(file);
+      input.value = '';
+    }
+  }
 
 
   const shopItems = [
@@ -96,7 +136,122 @@
   <!-- Main content -->
   <main class="main">
 
-    {#if activeSection === 'projects'}
+    {#if creatingProject}
+    <div class="create-project-form">
+      <div class="form-header">
+        <h2 class="form-title">Create a Project</h2>
+        <button class="form-cancel" onclick={cancelCreateProject}>&times;</button>
+      </div>
+
+      <div class="form-grid">
+        <div class="form-group">
+          <label class="form-label" for="project-name">Project Name</label>
+          <input id="project-name" type="text" class="form-input" maxlength={50} placeholder="My Awesome Project" bind:value={projectName} onfocus={() => focusedField = 0} />
+          <div class="form-caption-row">
+            <span class="form-caption">Give your project a name</span>
+            <span class="form-charcount" class:over={projectName.length >= 50}>{projectName.length}/50</span>
+          </div>
+        </div>
+
+        <div class="form-group">
+          <label class="form-label" for="project-desc">Description</label>
+          <textarea id="project-desc" class="form-input form-textarea" maxlength={300} placeholder={"Project goal:\nMy tech stack:\nHow long it took:"} bind:value={projectDesc} onfocus={() => focusedField = 1}></textarea>
+          <div class="form-caption-row">
+            <span class="form-caption">Describe your idea</span>
+            <span class="form-charcount" class:over={projectDesc.length >= 300}>{projectDesc.length}/300</span>
+          </div>
+        </div>
+
+        <div class="form-row">
+          <div class="form-group">
+            <label class="form-label" for="code-url">Code URL</label>
+            <input id="code-url" type="url" class="form-input" placeholder="https://github.com/hackclub/" bind:value={codeUrl} onfocus={() => focusedField = 2} />
+            <span class="form-caption">Link to your source code (GitHub, GitLab, etc)</span>
+          </div>
+          <div class="form-group">
+            <label class="form-label" for="readme-url">README URL</label>
+            <input id="readme-url" type="url" class="form-input" placeholder="https://github.com/hackclub/hackclub/blob/main/README.md" bind:value={readmeUrl} onfocus={() => focusedField = 3} />
+            <span class="form-caption">Link to your project's README file</span>
+          </div>
+        </div>
+
+        <div class="form-group">
+          <label class="form-label" for="demo-url">Demo URL</label>
+          <input id="demo-url" type="url" class="form-input" placeholder="https://hackclub.com" bind:value={demoUrl} onfocus={() => focusedField = 4} />
+          <span class="form-caption">Link to a live demo or playable version</span>
+        </div>
+
+        <div class="form-group">
+          <label class="form-label" for="screenshot">Screenshots</label>
+          <div class="screenshot-row">
+            <label class="upload-btn" for="screenshot">
+              <svg class="upload-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
+                <polyline points="17 8 12 3 7 8" />
+                <line x1="12" y1="3" x2="12" y2="15" />
+              </svg>
+              <span class="upload-btn-text">Upload</span>
+            </label>
+            <div class="screenshot-box">
+              {#if screenshotPreviews[0]}
+                <img src={screenshotPreviews[0]} alt="Preview 1" class="screenshot-preview" />
+                <button class="screenshot-remove" onclick={() => { screenshotFiles[0] = null; screenshotPreviews[0] = ''; }}>&times;</button>
+              {/if}
+            </div>
+            <div class="screenshot-box">
+              {#if screenshotPreviews[1]}
+                <img src={screenshotPreviews[1]} alt="Preview 2" class="screenshot-preview" />
+                <button class="screenshot-remove" onclick={() => { screenshotFiles[1] = null; screenshotPreviews[1] = ''; }}>&times;</button>
+              {/if}
+            </div>
+          </div>
+          <input id="screenshot" type="file" accept="image/*" class="form-file-hidden" onchange={handleScreenshot} />
+          <span class="form-caption">Show off with a banner or screenshot</span>
+        </div>
+
+        <div class="form-row">
+          <div class="form-group">
+            <label class="form-label" for="project-type">Project Type</label>
+            <select id="project-type" class="form-input form-select" bind:value={projectType} onfocus={() => focusedField = 5}>
+              <option value="" disabled selected>Select a type</option>
+              <option value="web">Web Playable</option>
+              <option value="windows">Windows Playable</option>
+              <option value="mac">Mac Playable</option>
+              <option value="linux">Linux Playable</option>
+              <option value="cross-platform">Cross Platform Compatible</option>
+              <option value="python">Python</option>
+              <option value="android">Android Playable</option>
+              <option value="ios">iOS Playable</option>
+            </select>
+          </div>
+          <div class="form-group">
+            <label class="form-label" for="hackatime">Hackatime Project/s</label>
+            <select id="hackatime" class="form-input form-select" bind:value={hackatimeProject} onfocus={() => focusedField = 6}>
+              <option value="" disabled selected>Select a project</option>
+              <option value="" disabled>Coming soon...</option>
+            </select>
+          </div>
+        </div>
+      </div>
+
+      <div class="form-actions">
+        <button class="form-btn-cancel" onclick={cancelCreateProject}>Cancel</button>
+        <button class="form-btn-submit">Create Project</button>
+      </div>
+
+      <svg class="form-gear form-gear-1" style="transform: rotate({focusedField * 30}deg)" viewBox="0 0 100 100" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+        <g fill="#6c6659"><circle cx="50" cy="50" r="30"/>{#each Array(8) as _, t (t)}<rect x="43" y="4" width="14" height="22" rx="3" transform="rotate({t*45} 50 50)"/>{/each}</g><circle cx="50" cy="50" r="12" fill="#635a4e"/>
+      </svg>
+      <svg class="form-gear form-gear-2" style="transform: rotate({-focusedField * 45 + 22.5}deg)" viewBox="0 0 100 100" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+        <g fill="#7f796d"><circle cx="50" cy="50" r="30"/>{#each Array(8) as _, t (t)}<rect x="43" y="4" width="14" height="22" rx="3" transform="rotate({t*45} 50 50)"/>{/each}</g><circle cx="50" cy="50" r="12" fill="#635a4e"/>
+      </svg>
+      <svg class="form-gear form-gear-3" style="transform: rotate({focusedField * 60}deg)" viewBox="0 0 100 100" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+        <g fill="#6c6659"><circle cx="50" cy="50" r="30"/>{#each Array(8) as _, t (t)}<rect x="43" y="4" width="14" height="22" rx="3" transform="rotate({t*45} 50 50)"/>{/each}</g><circle cx="50" cy="50" r="12" fill="#635a4e"/>
+      </svg>
+    </div>
+    {/if}
+
+    {#if !creatingProject && activeSection === 'projects'}
     <section class="section section-projects">
       <div class="section-inner">
         <div class="section-header">
@@ -130,7 +285,7 @@
 
         <div class="projects-empty">
           <p class="empty-text">No projects yet. Start building to earn hours!</p>
-          <button class="action-btn" onclick={() => navigate('projects')}>Create a Project</button>
+          <button class="action-btn" onclick={openCreateProject}>Create a Project</button>
         </div>
 
         <div class="bottom-row">
@@ -797,6 +952,298 @@
     font-size: 14px;
     color: #cbc1ae;
     line-height: 1.4;
+  }
+
+  /* ── create project form ─────────────────────────── */
+  .create-project-form {
+    background: #635a4e;
+    padding: 48px 48px 32px 300px;
+    min-height: 100vh;
+    box-sizing: border-box;
+    display: flex;
+    flex-direction: column;
+    width: 100%;
+    position: relative;
+    overflow: hidden;
+  }
+
+  .form-grid,
+  .form-header {
+    max-width: 1050px;
+  }
+
+  .form-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 28px;
+  }
+
+  .form-title {
+    margin: 0;
+    font-family: "Stone Breaker", "Courier New", monospace;
+    font-size: clamp(24px, 2.5vw, 36px);
+    color: #e6f4fe;
+    letter-spacing: 0.04em;
+    text-shadow: 0 2px 6px rgba(0, 0, 0, 0.4);
+  }
+
+  .form-cancel {
+    background: none;
+    border: none;
+    font-size: 28px;
+    color: #cbc1ae;
+    cursor: pointer;
+    padding: 4px 8px;
+    line-height: 1;
+  }
+
+  .form-cancel:hover {
+    color: #e6f4fe;
+  }
+
+  .form-grid {
+    display: flex;
+    flex-direction: column;
+    gap: 22px;
+    flex: 1;
+    overflow: hidden;
+  }
+
+  .form-row {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 24px;
+  }
+
+  .form-caption-row {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+  }
+
+  .form-caption {
+    font-family: "Courier New", monospace;
+    font-size: 13px;
+    color: #cbc1ae;
+  }
+
+  .form-charcount {
+    font-family: "Courier New", monospace;
+    font-size: 12px;
+    color: #7f796d;
+  }
+
+  .form-charcount.over {
+    color: #c48382;
+  }
+
+  .form-group {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+  }
+
+  .form-label {
+    font-family: "Stone Breaker", "Courier New", monospace;
+    font-size: 16px;
+    color: #cbc1ae;
+    letter-spacing: 0.04em;
+  }
+
+  .form-input {
+    padding: 10px 14px;
+    border: 1px solid rgba(230, 244, 254, 0.15);
+    border-radius: 0;
+    font-family: "Courier New", monospace;
+    font-size: 15px;
+    color: #e6f4fe;
+    background: rgba(0, 0, 0, 0.2);
+    transition: border-color 150ms ease;
+    clip-path: polygon(
+      0% 6%, 4% 0%, 8% 4%, 14% 1%, 20% 5%, 28% 0%, 35% 3%, 42% 1%, 50% 5%, 58% 0%, 65% 4%, 72% 1%, 80% 5%, 86% 0%, 92% 3%, 96% 1%, 100% 4%,
+      99.5% 50%,
+      100% 94%, 96% 100%, 92% 96%, 86% 100%, 80% 95%, 72% 100%, 65% 97%, 58% 100%, 50% 95%, 42% 100%, 35% 97%, 28% 100%, 20% 96%, 14% 100%, 8% 97%, 4% 100%, 0% 95%,
+      0.5% 50%
+    );
+  }
+
+  .form-input::placeholder {
+    color: #7f796d;
+  }
+
+  .form-input:focus {
+    outline: none;
+    background: rgba(0, 0, 0, 0.3);
+  }
+
+  .form-textarea {
+    min-height: 60px;
+    resize: none;
+  }
+
+  .form-select {
+    appearance: none;
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='8'%3E%3Cpath d='M1 1l5 5 5-5' stroke='%23cbc1ae' stroke-width='2' fill='none'/%3E%3C/svg%3E");
+    background-repeat: no-repeat;
+    background-position: right 12px center;
+    background-color: rgba(0, 0, 0, 0.2);
+    padding-right: 36px;
+  }
+
+  .form-select option {
+    background: #4b4840;
+    color: #e6f4fe;
+  }
+
+  .screenshot-row {
+    display: flex;
+    gap: 16px;
+    height: 220px;
+  }
+
+  .upload-btn {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+    width: 160px;
+    flex-shrink: 0;
+    background: rgba(0, 0, 0, 0.2);
+    border: 1px solid rgba(230, 244, 254, 0.15);
+    cursor: pointer;
+    transition: background 150ms ease;
+  }
+
+  .upload-btn:hover {
+    background: rgba(0, 0, 0, 0.3);
+  }
+
+  .upload-btn-text {
+    font-family: "Courier New", monospace;
+    font-size: 13px;
+    color: #cbc1ae;
+  }
+
+  .screenshot-box {
+    flex: 1;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    border: 2px dashed rgba(230, 244, 254, 0.25);
+    background: rgba(0, 0, 0, 0.1);
+    position: relative;
+  }
+
+  .screenshot-remove {
+    position: absolute;
+    top: 6px;
+    right: 6px;
+    background: rgba(0, 0, 0, 0.5);
+    border: none;
+    color: #e6f4fe;
+    font-size: 18px;
+    width: 24px;
+    height: 24px;
+    line-height: 1;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
+
+  .screenshot-remove:hover {
+    background: #c48382;
+  }
+
+  .screenshot-preview {
+    max-width: 100%;
+    max-height: 100%;
+    object-fit: contain;
+  }
+
+  .upload-icon {
+    width: 36px;
+    height: 36px;
+    color: #cbc1ae;
+  }
+
+  .form-file-hidden {
+    display: none;
+  }
+
+  .form-gear {
+    position: absolute;
+    right: -80px;
+    pointer-events: none;
+    transition: transform 0.6s cubic-bezier(0.4, 0, 0.2, 1);
+  }
+
+  .form-gear-1 {
+    top: 10%;
+    width: 210px;
+    height: 210px;
+    right: -105px;
+  }
+
+  .form-gear-2 {
+    top: 36%;
+    width: 320px;
+    height: 320px;
+    right: -160px;
+  }
+
+  .form-gear-3 {
+    top: 75%;
+    width: 190px;
+    height: 190px;
+    right: -95px;
+  }
+
+  .form-actions {
+    position: fixed;
+    bottom: 32px;
+    right: 48px;
+    display: flex;
+    gap: 12px;
+    z-index: 10;
+  }
+
+  .form-btn-cancel {
+    padding: 10px 24px;
+    background: none;
+    border: 2px solid rgba(230, 244, 254, 0.2);
+    border-radius: 4px;
+    font-family: "Courier New", monospace;
+    font-size: 15px;
+    font-weight: 700;
+    color: #cbc1ae;
+    cursor: pointer;
+    transition: background 150ms ease;
+  }
+
+  .form-btn-cancel:hover {
+    background: rgba(230, 244, 254, 0.08);
+  }
+
+  .form-btn-submit {
+    padding: 10px 28px;
+    background: #c48382;
+    border: none;
+    border-radius: 4px;
+    font-family: "Courier New", monospace;
+    font-size: 15px;
+    font-weight: 700;
+    color: #fff;
+    cursor: pointer;
+    box-shadow: 4px 4px 0 #3a3832;
+    transition: transform 100ms ease, box-shadow 100ms ease;
+  }
+
+  .form-btn-submit:hover {
+    transform: translate(-1px, -1px);
+    box-shadow: 5px 5px 0 #3a3832;
   }
 
   /* ── shop ────────────────────────────────────────── */
