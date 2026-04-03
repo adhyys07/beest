@@ -19,6 +19,7 @@
   let activeSection = $state('projects');
   let tileLoaded = $state(false);
   let creatingProject = $state(false);
+  let editingProject = $state<any>(null);
 
   let projectName = $state('');
   let projectDesc = $state('');
@@ -29,6 +30,10 @@
   let screenshotFiles = $state<(File | null)[]>([null, null]);
   let screenshotPreviews = $state<string[]>(['', '']);
   let hackatimeProject = $state('');
+  let isUpdateProject = $state(false);
+  let otherHcProgram = $state(false);
+  let otherHcProgramName = $state('');
+  let projects = $state<any[]>([]);
   let hackatimeProjects = $state<string[]>([]);
   let hackatimeLoading = $state(false);
   let submitting = $state(false);
@@ -37,15 +42,23 @@
   let totalHours = $state(0);
   const GOAL_HOURS = 40;
   let progressPct = $derived(Math.min((totalHours / GOAL_HOURS) * 100, 100));
-  let focusedField = $state(0);
+  let keystrokes = $state(0);
   let canSubmit = $derived(projectName.trim() !== '' && projectDesc.trim() !== '' && projectType !== '' && !submitting);
+  let canSubmitForReview = $derived(
+    projectName.trim() !== '' &&
+    projectDesc.trim() !== '' &&
+    projectType !== '' &&
+    codeUrl.trim() !== '' &&
+    readmeUrl.trim() !== '' &&
+    demoUrl.trim() !== '' &&
+    hackatimeProject !== '' &&
+    !submitting
+  );
+  let projectCols = $derived(Math.ceil(Math.sqrt(projects.length)));
 
-  function openCreateProject() {
-    creatingProject = true;
-  }
-
-  function cancelCreateProject() {
+  function resetForm() {
     creatingProject = false;
+    editingProject = null;
     projectName = '';
     projectDesc = '';
     projectType = '';
@@ -55,17 +68,42 @@
     screenshotFiles = [null, null];
     screenshotPreviews = ['', ''];
     hackatimeProject = '';
+    isUpdateProject = false;
+    otherHcProgram = false;
+    otherHcProgramName = '';
+    keystrokes = 0;
+    formError = '';
+  }
+
+  function openCreateProject() {
+    resetForm();
+    creatingProject = true;
+  }
+
+  function openEditProject(project: any) {
+    resetForm();
+    editingProject = project;
+    projectName = project.name ?? '';
+    projectDesc = project.description ?? '';
+    projectType = project.projectType ?? '';
+    codeUrl = project.codeUrl ?? '';
+    demoUrl = project.demoUrl ?? '';
+    readmeUrl = project.readmeUrl ?? '';
+    hackatimeProject = project.hackatimeProjectName ?? '';
+    isUpdateProject = project.isUpdate ?? false;
+    otherHcProgram = !!(project.otherHcProgram);
+    otherHcProgramName = project.otherHcProgram ?? '';
+    screenshotPreviews = [project.screenshot1Url ?? '', project.screenshot2Url ?? ''];
+  }
+
+  function cancelCreateProject() {
+    resetForm();
   }
 
   function handleScreenshot(e: Event) {
     const input = e.target as HTMLInputElement;
     const file = input.files?.[0];
     if (!file) return;
-    if (file.size > 5 * 1024 * 1024) {
-      formError = 'Screenshot must be under 5 MB';
-      input.value = '';
-      return;
-    }
     if (!['image/png', 'image/jpeg', 'image/gif', 'image/webp'].includes(file.type)) {
       formError = 'Screenshot must be a PNG, JPEG, GIF, or WebP image';
       input.value = '';
@@ -85,6 +123,16 @@
       reader.onerror = reject;
       reader.readAsDataURL(file);
     });
+  }
+
+  async function fetchProjects() {
+    try {
+      const res = await fetch('/api/projects');
+      if (res.ok) {
+        const data = await res.json();
+        projects = Array.isArray(data) ? data : [];
+      }
+    } catch { /* silent */ }
   }
 
   async function fetchProjectHours() {
@@ -108,7 +156,8 @@
   }
 
   function timeAgo(dateStr: string): string {
-    const seconds = Math.floor((Date.now() - new Date(dateStr).getTime()) / 1000);
+    const iso = dateStr.endsWith('Z') || dateStr.includes('+') ? dateStr : dateStr + 'Z';
+    const seconds = Math.floor((Date.now() - new Date(iso).getTime()) / 1000);
     if (seconds < 60) return 'just now';
     const minutes = Math.floor(seconds / 60);
     if (minutes < 60) return `${minutes}m ago`;
@@ -143,35 +192,84 @@
         if (file) screenshots.push(await fileToDataUri(file));
       }
 
-      const res = await fetch('/api/projects', {
-        method: 'POST',
+      const isEdit = !!editingProject;
+      const url = isEdit ? `/api/projects/${editingProject.id}` : '/api/projects';
+      const method = isEdit ? 'PATCH' : 'POST';
+
+      const body: any = {
+        name: projectName,
+        description: projectDesc,
+        projectType,
+        codeUrl: codeUrl || null,
+        readmeUrl: readmeUrl || null,
+        demoUrl: demoUrl || null,
+        hackatimeProjectName: hackatimeProject || null,
+        isUpdate: isUpdateProject,
+        otherHcProgram: otherHcProgram ? otherHcProgramName || null : null,
+      };
+      if (screenshots.length) body.screenshots = screenshots;
+
+      const res = await fetch(url, {
+        method,
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          name: projectName,
-          description: projectDesc,
-          projectType,
-          codeUrl: codeUrl || undefined,
-          readmeUrl: readmeUrl || undefined,
-          demoUrl: demoUrl || undefined,
-          screenshots: screenshots.length ? screenshots : undefined,
-          hackatimeProjectName: hackatimeProject || undefined
-        })
+        body: JSON.stringify(body)
       });
 
       const data = await res.json().catch(() => ({}));
 
       if (!res.ok) {
-        formError = data.message || 'Failed to create project';
+        const msg = Array.isArray(data.message) ? data.message.join(', ') : data.message;
+        formError = msg || `Server error (${res.status})`;
         submitting = false;
         return;
       }
 
-      cancelCreateProject();
+      resetForm();
+      fetchProjects();
+      fetchAuditLog();
+      fetchProjectHours();
+    } catch {
+      formError = 'Something went wrong. Please try again.';
+    }
+    submitting = false;
+  }
+
+  async function submitForReview() {
+    if (!editingProject || !canSubmitForReview) return;
+    submitting = true;
+    formError = '';
+    try {
+      const res = await fetch(`/api/projects/${editingProject.id}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ status: 'unreviewed' })
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        formError = Array.isArray(data.message) ? data.message.join(', ') : data.message || `Server error (${res.status})`;
+        submitting = false;
+        return;
+      }
+      resetForm();
+      fetchProjects();
       fetchAuditLog();
     } catch {
       formError = 'Something went wrong. Please try again.';
     }
     submitting = false;
+  }
+
+  async function deleteProject(id: string) {
+    if (!confirm('Delete this project? This cannot be undone.')) return;
+    try {
+      const res = await fetch(`/api/projects/${id}`, { method: 'DELETE' });
+      if (res.ok) {
+        resetForm();
+        fetchProjects();
+        fetchAuditLog();
+        fetchProjectHours();
+      }
+    } catch { /* silent */ }
   }
 
 
@@ -207,6 +305,7 @@
     const tileImg = new Image();
     tileImg.src = '/images/tile.webp';
     tileImg.onload = () => { tileLoaded = true; };
+    fetchProjects();
     fetchHackatimeProjects();
     fetchAuditLog();
     fetchProjectHours();
@@ -255,17 +354,17 @@
   <!-- Main content -->
   <main class="main">
 
-    {#if creatingProject}
-    <div class="create-project-form">
+    {#if creatingProject || editingProject}
+    <!-- svelte-ignore a11y_no_static_element_interactions -->
+    <div class="create-project-form" onkeydown={() => keystrokes++}>
       <div class="form-header">
-        <h2 class="form-title">Create a Project</h2>
-        <button class="form-cancel" onclick={cancelCreateProject}>&times;</button>
+        <button class="form-cancel" onclick={resetForm}>&times;</button>
       </div>
 
       <div class="form-grid">
         <div class="form-group">
           <label class="form-label" for="project-name">Project Name <span class="required">*</span></label>
-          <input id="project-name" type="text" class="form-input" maxlength={50} placeholder="My Awesome Project" bind:value={projectName} onfocus={() => focusedField = 0} />
+          <input id="project-name" type="text" class="form-input" maxlength={50} placeholder="My Awesome Project" bind:value={projectName} />
           <div class="form-caption-row">
             <span class="form-caption">Give your project a name</span>
             <span class="form-charcount" class:over={projectName.length >= 50}>{projectName.length}/50</span>
@@ -274,7 +373,7 @@
 
         <div class="form-group">
           <label class="form-label" for="project-desc">Description <span class="required">*</span></label>
-          <textarea id="project-desc" class="form-input form-textarea" maxlength={300} placeholder={"Project goal:\nMy tech stack:\nHow long it took:"} bind:value={projectDesc} onfocus={() => focusedField = 1}></textarea>
+          <textarea id="project-desc" class="form-input form-textarea" maxlength={300} placeholder={"Project goal:\nMy tech stack:\nHow long it took:"} bind:value={projectDesc}></textarea>
           <div class="form-caption-row">
             <span class="form-caption">Describe your idea</span>
             <span class="form-charcount" class:over={projectDesc.length >= 300}>{projectDesc.length}/300</span>
@@ -284,19 +383,19 @@
         <div class="form-row">
           <div class="form-group">
             <label class="form-label" for="code-url">Code URL</label>
-            <input id="code-url" type="url" class="form-input" placeholder="https://github.com/hackclub/" bind:value={codeUrl} onfocus={() => focusedField = 2} />
+            <input id="code-url" type="url" class="form-input" placeholder="https://github.com/hackclub/" bind:value={codeUrl} />
             <span class="form-caption">Link to your source code (GitHub, GitLab, etc)</span>
           </div>
           <div class="form-group">
             <label class="form-label" for="readme-url">README URL</label>
-            <input id="readme-url" type="url" class="form-input" placeholder="https://github.com/hackclub/hackclub/blob/main/README.md" bind:value={readmeUrl} onfocus={() => focusedField = 3} />
+            <input id="readme-url" type="url" class="form-input" placeholder="https://github.com/hackclub/hackclub/blob/main/README.md" bind:value={readmeUrl} />
             <span class="form-caption">Link to your project's README file</span>
           </div>
         </div>
 
         <div class="form-group">
           <label class="form-label" for="demo-url">Demo URL</label>
-          <input id="demo-url" type="url" class="form-input" placeholder="https://hackclub.com" bind:value={demoUrl} onfocus={() => focusedField = 4} />
+          <input id="demo-url" type="url" class="form-input" placeholder="https://hackclub.com" bind:value={demoUrl} />
           <span class="form-caption">Link to a live demo or playable version</span>
         </div>
 
@@ -331,7 +430,7 @@
         <div class="form-row">
           <div class="form-group">
             <label class="form-label" for="project-type">Project Type <span class="required">*</span></label>
-            <select id="project-type" class="form-input form-select" bind:value={projectType} onfocus={() => focusedField = 5}>
+            <select id="project-type" class="form-input form-select" bind:value={projectType}>
               <option value="" disabled selected>Select a type</option>
               <option value="web">Web Playable</option>
               <option value="windows">Windows Playable</option>
@@ -346,7 +445,7 @@
           <div class="form-group">
             <label class="form-label" for="hackatime">Hackatime Project/s</label>
             <div class="hackatime-row">
-              <select id="hackatime" class="form-input form-select" bind:value={hackatimeProject} onfocus={() => focusedField = 6}>
+              <select id="hackatime" class="form-input form-select" bind:value={hackatimeProject}>
                 <option value="" disabled selected>Select a project</option>
                 {#if hackatimeLoading}
                   <option value="" disabled>Loading...</option>
@@ -366,32 +465,69 @@
             </div>
           </div>
         </div>
+
+        <div class="form-row">
+          <label class="form-checkbox">
+            <input type="checkbox" bind:checked={isUpdateProject} />
+            <span>This is an update to an existing project</span>
+          </label>
+          <label class="form-checkbox">
+            <input type="checkbox" bind:checked={otherHcProgram} />
+            <span>This is submitted to another Hack Club program</span>
+          </label>
+        </div>
+
       </div>
 
       {#if formError}
         <p class="form-error">{formError}</p>
       {/if}
 
-      <div class="form-actions">
-        <button class="form-btn-cancel" onclick={cancelCreateProject}>Cancel</button>
-        <button class="form-btn-submit" disabled={!canSubmit} onclick={submitProject}>
-          {#if submitting}Creating...{:else}Create Project{/if}
-        </button>
+      <div class="form-bottom-row">
+        {#if otherHcProgram}
+        <div class="form-group other-program-group">
+          <label class="form-label" for="other-program">Which program?</label>
+          <input id="other-program" type="text" class="form-input" maxlength={255} placeholder="e.g. Boba Drops, Arcade" bind:value={otherHcProgramName} />
+        </div>
+        {/if}
+        <div class="form-actions">
+          {#if editingProject}
+            <button class="form-btn-delete" onclick={() => deleteProject(editingProject.id)}>Delete</button>
+          {/if}
+          <button class="form-btn-submit" disabled={!canSubmit} onclick={submitProject}>
+            {#if submitting}{editingProject ? 'Saving...' : 'Creating...'}{:else}{editingProject ? 'Save Changes' : 'Create Project'}{/if}
+          </button>
+          {#if editingProject}
+            <div class="submit-review-wrap">
+              <button
+                class="form-btn-review"
+                class:ready={canSubmitForReview}
+                disabled={!canSubmitForReview}
+                onclick={submitForReview}
+              >
+                Submit
+              </button>
+              {#if !canSubmitForReview}
+                <span class="review-tooltip">Fill out all sections before submitting</span>
+              {/if}
+            </div>
+          {/if}
+        </div>
       </div>
 
-      <svg class="form-gear form-gear-1" style="transform: rotate({focusedField * 30}deg)" viewBox="0 0 100 100" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+      <svg class="form-gear form-gear-1" style="transform: rotate({keystrokes * 3}deg)" viewBox="0 0 100 100" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
         <g fill="#6c6659"><circle cx="50" cy="50" r="30"/>{#each Array(8) as _, t (t)}<rect x="43" y="4" width="14" height="22" rx="3" transform="rotate({t*45} 50 50)"/>{/each}</g><circle cx="50" cy="50" r="12" fill="#635a4e"/>
       </svg>
-      <svg class="form-gear form-gear-2" style="transform: rotate({-focusedField * 45 + 22.5}deg)" viewBox="0 0 100 100" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+      <svg class="form-gear form-gear-2" style="transform: rotate({-keystrokes * 2 + 22.5}deg)" viewBox="0 0 100 100" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
         <g fill="#7f796d"><circle cx="50" cy="50" r="30"/>{#each Array(8) as _, t (t)}<rect x="43" y="4" width="14" height="22" rx="3" transform="rotate({t*45} 50 50)"/>{/each}</g><circle cx="50" cy="50" r="12" fill="#635a4e"/>
       </svg>
-      <svg class="form-gear form-gear-3" style="transform: rotate({focusedField * 60}deg)" viewBox="0 0 100 100" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+      <svg class="form-gear form-gear-3" style="transform: rotate({keystrokes * 4}deg)" viewBox="0 0 100 100" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
         <g fill="#6c6659"><circle cx="50" cy="50" r="30"/>{#each Array(8) as _, t (t)}<rect x="43" y="4" width="14" height="22" rx="3" transform="rotate({t*45} 50 50)"/>{/each}</g><circle cx="50" cy="50" r="12" fill="#635a4e"/>
       </svg>
     </div>
     {/if}
 
-    {#if !creatingProject && activeSection === 'projects'}
+    {#if !creatingProject && !editingProject && activeSection === 'projects'}
     <section class="section section-projects">
       <div class="section-inner">
         <div class="section-header">
@@ -402,6 +538,7 @@
           <div class="progress-key">
             <span class="key-item"><span class="key-swatch approved"></span>Approved</span>
             <span class="key-item"><span class="key-swatch unreviewed"></span>Unreviewed</span>
+            <span class="key-item"><span class="key-swatch changes-needed"></span>Changes Needed</span>
             <span class="key-item"><span class="key-swatch unshipped"></span>Unshipped</span>
           </div>
         </div>
@@ -423,9 +560,42 @@
           </div>
         </div>
 
-        <div class="projects-empty">
-          <p class="empty-text">No projects yet. Start building to earn hours!</p>
-          <button class="action-btn" onclick={openCreateProject}>Create a Project</button>
+        <div class="projects-box" class:has-projects={projects.length > 0} style:--cols={projectCols}>
+          {#if projects.length === 0}
+            <p class="empty-text">No projects yet. Start building to earn hours!</p>
+            <button class="action-btn" onclick={openCreateProject}>Create a Project</button>
+          {:else}
+            {#each projects as project}
+              <div class="project-card" role="button" tabindex="0" onclick={() => openEditProject(project)} onkeydown={(e) => { if (e.key === 'Enter') openEditProject(project); }}>
+                {#if project.screenshot1Url}
+                  <img class="project-thumb" src={project.screenshot1Url} alt="{project.name} screenshot" />
+                {/if}
+                <div class="project-info">
+                  <div class="project-header-row">
+                    <h3 class="project-name">{project.name}</h3>
+                    <span class="project-type-badge">{project.projectType}</span>
+                    <span class="project-status-badge {project.status}">{project.status === 'changes_needed' ? 'Changes Needed' : project.status}</span>
+                  </div>
+                  <p class="project-desc">{project.description}</p>
+                  <div class="project-links">
+                    {#if project.codeUrl}
+                      <a href={project.codeUrl} target="_blank" rel="noopener noreferrer" class="project-link">Code</a>
+                    {/if}
+                    {#if project.demoUrl}
+                      <a href={project.demoUrl} target="_blank" rel="noopener noreferrer" class="project-link">Demo</a>
+                    {/if}
+                    {#if project.readmeUrl}
+                      <a href={project.readmeUrl} target="_blank" rel="noopener noreferrer" class="project-link">README</a>
+                    {/if}
+                    {#if project.hackatimeProjectName}
+                      <span class="project-hackatime">Hackatime: {project.hackatimeProjectName}</span>
+                    {/if}
+                  </div>
+                </div>
+              </div>
+            {/each}
+            <button class="action-btn new-project-btn" onclick={openCreateProject}>+ New Project</button>
+          {/if}
         </div>
 
         <div class="bottom-row">
@@ -630,13 +800,14 @@
     min-height: 100vh;
   }
 
+
   /* ── sidebar ─────────────────────────────────────── */
   .sidebar {
     position: fixed;
     top: 0;
     left: 0;
     width: 100px;
-    height: 100vh;
+    bottom: 0;
     z-index: 100;
     transition: width 300ms cubic-bezier(0.4, 0, 0.2, 1);
   }
@@ -1026,21 +1197,25 @@
 
   .timeline-label {
     margin: 0;
-    font-family: "Courier New", monospace;
-    font-size: 14px;
+    font-family: "Sunny Mood", "Courier New", monospace;
+    font-size: 17px;
+    text-shadow: 2px 2px 0 rgba(0, 0, 0, 0.3);
     color: #e6f4fe;
     line-height: 1.4;
   }
 
   .timeline-empty {
+    font-family: "Sunny Mood", "Courier New", monospace;
     color: rgba(230, 244, 254, 0.4);
-    font-size: 14px;
+    font-size: 17px;
     font-style: italic;
+    text-shadow: 2px 2px 0 rgba(0, 0, 0, 0.3);
   }
 
   .timeline-time {
-    font-family: "Courier New", monospace;
-    font-size: 12px;
+    font-family: "Sunny Mood", "Courier New", monospace;
+    font-size: 14px;
+    text-shadow: 2px 2px 0 rgba(0, 0, 0, 0.3);
     color: #7f796d;
   }
 
@@ -1058,8 +1233,9 @@
   }
 
   .news-date {
-    font-family: "Courier New", monospace;
-    font-size: 12px;
+    font-family: "Sunny Mood", "Courier New", monospace;
+    font-size: 14px;
+    text-shadow: 2px 2px 0 rgba(0, 0, 0, 0.3);
     color: #e6f4fe;
     white-space: nowrap;
     flex-shrink: 0;
@@ -1068,8 +1244,9 @@
 
   .news-text {
     margin: 0;
-    font-family: "Courier New", monospace;
-    font-size: 14px;
+    font-family: "Sunny Mood", "Courier New", monospace;
+    font-size: 17px;
+    text-shadow: 2px 2px 0 rgba(0, 0, 0, 0.3);
     color: #cbc1ae;
     line-height: 1.4;
   }
@@ -1084,7 +1261,7 @@
     flex-direction: column;
     width: 100%;
     position: relative;
-    overflow: hidden;
+    overflow-x: clip;
   }
 
   .form-grid,
@@ -1093,29 +1270,22 @@
   }
 
   .form-header {
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-    margin-bottom: 28px;
-  }
-
-  .form-title {
-    margin: 0;
-    font-family: "Stone Breaker", "Courier New", monospace;
-    font-size: clamp(24px, 2.5vw, 36px);
-    color: #e6f4fe;
-    letter-spacing: 0.04em;
-    text-shadow: 0 2px 6px rgba(0, 0, 0, 0.4);
+    display: contents;
   }
 
   .form-cancel {
+    position: absolute;
+    top: 16px;
+    right: 16px;
     background: none;
     border: none;
-    font-size: 28px;
+    font-size: 64px;
+    font-weight: 900;
     color: #cbc1ae;
     cursor: pointer;
-    padding: 4px 8px;
+    padding: 4px 12px;
     line-height: 1;
+    z-index: 1;
   }
 
   .form-cancel:hover {
@@ -1135,6 +1305,45 @@
     grid-template-columns: 1fr 1fr;
     gap: 24px;
     align-items: end;
+  }
+
+  .form-checkbox {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    cursor: pointer;
+    font-family: "Courier New", monospace;
+    font-size: 15px;
+    color: #cbc1ae;
+  }
+
+  .form-checkbox input[type="checkbox"] {
+    appearance: none;
+    width: 20px;
+    height: 20px;
+    border: 2px solid rgba(230, 244, 254, 0.3);
+    border-radius: 3px;
+    background: rgba(0, 0, 0, 0.2);
+    cursor: pointer;
+    flex-shrink: 0;
+    position: relative;
+  }
+
+  .form-checkbox input[type="checkbox"]:checked {
+    background: #93b4cd;
+    border-color: #93b4cd;
+  }
+
+  .form-checkbox input[type="checkbox"]:checked::after {
+    content: '';
+    position: absolute;
+    left: 5px;
+    top: 1px;
+    width: 6px;
+    height: 11px;
+    border: solid #fff;
+    border-width: 0 2px 2px 0;
+    transform: rotate(45deg);
   }
 
   .form-caption-row {
@@ -1299,6 +1508,7 @@
     right: -80px;
     pointer-events: none;
     transition: transform 0.6s cubic-bezier(0.4, 0, 0.2, 1);
+    display: none;
   }
 
   .form-gear-1 {
@@ -1322,30 +1532,43 @@
     right: -95px;
   }
 
-  .form-actions {
-    position: fixed;
-    bottom: 32px;
-    right: 48px;
+  .form-bottom-row {
     display: flex;
-    gap: 12px;
-    z-index: 10;
+    align-items: flex-end;
+    gap: 24px;
+    margin-top: 24px;
+    max-width: 1050px;
   }
 
-  .form-btn-cancel {
+  .other-program-group {
+    flex: 1;
+    min-width: 0;
+  }
+
+  .form-actions {
+    display: flex;
+    gap: 12px;
+    margin-left: auto;
+    flex-shrink: 0;
+  }
+
+  .form-btn-delete {
     padding: 10px 24px;
     background: none;
-    border: 2px solid rgba(230, 244, 254, 0.2);
+    border: 2px solid #c48382;
     border-radius: 4px;
     font-family: "Courier New", monospace;
     font-size: 15px;
     font-weight: 700;
-    color: #cbc1ae;
+    color: #c48382;
     cursor: pointer;
-    transition: background 150ms ease;
+    margin-right: auto;
+    transition: background 150ms ease, color 150ms ease;
   }
 
-  .form-btn-cancel:hover {
-    background: rgba(230, 244, 254, 0.08);
+  .form-btn-delete:hover {
+    background: #c48382;
+    color: #fff;
   }
 
   .form-btn-submit {
@@ -1370,6 +1593,56 @@
   .form-btn-submit:disabled {
     opacity: 0.4;
     cursor: not-allowed;
+  }
+
+  .submit-review-wrap {
+    position: relative;
+  }
+
+  .form-btn-review {
+    padding: 10px 28px;
+    background: #7f796d;
+    border: none;
+    border-radius: 4px;
+    font-family: "Courier New", monospace;
+    font-size: 15px;
+    font-weight: 700;
+    color: #fff;
+    cursor: not-allowed;
+    opacity: 0.5;
+    transition: background 200ms ease, opacity 200ms ease;
+  }
+
+  .form-btn-review.ready {
+    background: #5a9e6f;
+    cursor: pointer;
+    opacity: 1;
+    box-shadow: 4px 4px 0 #3a3832;
+  }
+
+  .form-btn-review.ready:hover {
+    background: #4a8e5f;
+    transform: translate(-1px, -1px);
+    box-shadow: 5px 5px 0 #3a3832;
+  }
+
+  .review-tooltip {
+    display: none;
+    position: absolute;
+    bottom: calc(100% + 8px);
+    right: 0;
+    background: #3a3832;
+    color: #cbc1ae;
+    font-family: "Sunny Mood", "Courier New", monospace;
+    font-size: 14px;
+    padding: 8px 12px;
+    white-space: nowrap;
+    text-shadow: 1px 1px 0 rgba(0, 0, 0, 0.3);
+    clip-path: polygon(2% 0%, 98% 3%, 100% 97%, 0% 100%);
+  }
+
+  .submit-review-wrap:hover .review-tooltip {
+    display: block;
   }
 
   .required {
@@ -1434,6 +1707,8 @@
     background: rgba(196, 131, 130, 0.1);
     border: 1px solid rgba(196, 131, 130, 0.3);
     border-radius: 6px;
+    max-width: 1050px;
+    box-sizing: border-box;
   }
 
   /* ── shop ────────────────────────────────────────── */
@@ -1618,8 +1893,9 @@
   }
 
   .progress-key {
-    display: flex;
-    gap: 28px;
+    display: grid;
+    grid-template-columns: auto auto;
+    gap: 8px 28px;
     flex-shrink: 0;
     padding-top: 6px;
   }
@@ -1628,8 +1904,9 @@
     display: flex;
     align-items: center;
     gap: 10px;
-    font-family: "Courier New", monospace;
-    font-size: 17px;
+    font-family: "Sunny Mood", "Courier New", monospace;
+    font-size: 20px;
+    text-shadow: 2px 2px 0 rgba(0, 0, 0, 0.3);
     color: #cbc1ae;
     text-shadow: 2px 2px 0 rgba(0, 0, 0, 0.3);
   }
@@ -1649,20 +1926,35 @@
     background: #cbc1ae;
   }
 
+  .key-swatch.changes-needed {
+    background: #d4a55a;
+  }
+
   .key-swatch.unshipped {
     background: #c48382;
   }
 
-  .projects-empty {
+  .projects-box {
     display: flex;
     flex-direction: column;
     align-items: center;
     justify-content: center;
-    padding: 48px 20px;
+    padding: 24px 20px;
     border: 4px dashed rgba(230, 244, 254, 0.2);
     border-radius: 8px;
     text-align: center;
     flex: 1;
+    gap: 16px;
+  }
+
+  .projects-box.has-projects {
+    display: grid;
+    grid-template-columns: repeat(var(--cols, 1), 1fr);
+    align-items: stretch;
+    justify-content: start;
+    max-height: min(60vh, 600px);
+    overflow-y: auto;
+    overflow-x: hidden;
   }
 
   .empty-text {
@@ -1693,6 +1985,151 @@
   .action-btn:hover {
     transform: translate(-1px, -1px);
     box-shadow: 5px 5px 0 #3a3832;
+  }
+
+  /* ── project cards ──────────────────────────────── */
+  .project-card {
+    display: flex;
+    gap: 16px;
+    min-width: 0;
+    background: rgba(0, 0, 0, 0.2);
+    border: 1px solid rgba(230, 244, 254, 0.1);
+    padding: 16px;
+    text-align: left;
+    clip-path: polygon(
+      0% 4%, 2% 0%, 5% 3%, 98% 1%, 100% 5%,
+      100% 96%, 98% 100%, 2% 98%, 0% 100%, 0% 4%
+    );
+    cursor: pointer;
+    transition: background 150ms ease;
+  }
+
+  .project-card:hover {
+    background: rgba(0, 0, 0, 0.3);
+  }
+
+  .project-thumb {
+    width: 100px;
+    height: 100px;
+    object-fit: cover;
+    flex-shrink: 0;
+    clip-path: polygon(2% 0%, 98% 3%, 100% 97%, 0% 100%);
+  }
+
+  .project-info {
+    flex: 1;
+    min-width: 0;
+  }
+
+  .project-header-row {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    margin-bottom: 6px;
+  }
+
+  .project-name {
+    font-family: "Stone Breaker", "Courier New", monospace;
+    font-size: clamp(20px, 2vw, 26px);
+    color: #e6f4fe;
+    margin: 0;
+    letter-spacing: 0.02em;
+    text-shadow: 2px 2px 0 rgba(0, 0, 0, 0.4);
+  }
+
+  .project-type-badge {
+    font-family: "Courier New", monospace;
+    font-size: 14px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    color: #635a4e;
+    background: #cbc1ae;
+    padding: 4px 12px;
+    clip-path: polygon(4% 0%, 96% 4%, 100% 96%, 0% 100%);
+  }
+
+  .project-status-badge {
+    font-family: "Courier New", monospace;
+    font-size: 14px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    color: #fff;
+    padding: 4px 12px;
+    clip-path: polygon(4% 0%, 96% 4%, 100% 96%, 0% 100%);
+  }
+
+  .project-status-badge.unshipped {
+    background: #c48382;
+  }
+
+  .project-status-badge.unreviewed {
+    background: #cbc1ae;
+    color: #635a4e;
+  }
+
+  .project-status-badge.changes_needed {
+    background: #d4a55a;
+    color: #635a4e;
+  }
+
+  .project-status-badge.approved {
+    background: #93b4cd;
+    color: #635a4e;
+  }
+
+  .project-desc {
+    font-family: "Sunny Mood", "Courier New", monospace;
+    font-size: 18px;
+    text-shadow: 2px 2px 0 rgba(0, 0, 0, 0.3);
+    color: #cbc1ae;
+    margin: 0 0 10px;
+    line-height: 1.4;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    display: -webkit-box;
+    -webkit-line-clamp: 2;
+    -webkit-box-orient: vertical;
+  }
+
+  .project-links {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 10px;
+    align-items: center;
+  }
+
+  .project-link {
+    font-family: "Courier New", monospace;
+    font-size: 13px;
+    font-weight: 700;
+    color: #93b4cd;
+    text-decoration: none;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+  }
+
+  .project-link:hover {
+    color: #e6f4fe;
+  }
+
+  .project-hackatime {
+    font-family: "Courier New", monospace;
+    font-size: 13px;
+    color: #7f796d;
+  }
+
+  .new-project-btn {
+    grid-column: 1 / -1;
+    justify-self: center;
+    align-self: start;
+    width: fit-content;
+    margin-top: 8px;
+    font-family: "Sunny Mood", "Courier New", monospace;
+    font-size: 17px;
+    text-shadow: 2px 2px 0 rgba(0, 0, 0, 0.3);
+    padding: 8px 20px;
   }
 
   /* ── explore ─────────────────────────────────────── */
@@ -1904,6 +2341,12 @@
   }
 
   /* ── mobile ──────────────────────────────────────── */
+  @media (min-width: 1200px) {
+    .form-gear {
+      display: block;
+    }
+  }
+
   @media (max-width: 900px) {
     .sidebar {
       position: fixed;

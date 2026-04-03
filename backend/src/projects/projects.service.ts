@@ -1,4 +1,4 @@
-import { Injectable, BadRequestException, Logger } from '@nestjs/common';
+import { Injectable, BadRequestException, NotFoundException, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
@@ -7,9 +7,7 @@ import { fetchWithTimeout } from '../fetch.util';
 import { AuditLogService } from '../audit-log/audit-log.service';
 import { HackatimeService } from '../hackatime/hackatime.service';
 import { CreateProjectDto } from './create-project.dto';
-
-/** Max raw image size in bytes (5 MB). */
-const MAX_IMAGE_BYTES = 5 * 1024 * 1024;
+import { UpdateProjectDto } from './update-project.dto';
 
 const CDN_UPLOAD_URL = 'https://cdn.hackclub.com/api/v4/upload';
 
@@ -83,6 +81,9 @@ export class ProjectsService {
       }
     }
 
+    const isUpdate = dto.isUpdate === true;
+    const otherHcProgram = this.validateOptionalString(dto.otherHcProgram, 'otherHcProgram', 255);
+
     const project = this.projectRepo.create({
       userId,
       name,
@@ -94,6 +95,8 @@ export class ProjectsService {
       screenshot1Url: screenshotUrls[0],
       screenshot2Url: screenshotUrls[1],
       hackatimeProjectName,
+      isUpdate,
+      otherHcProgram,
     });
 
     const saved = await this.projectRepo.save(project);
@@ -124,6 +127,9 @@ export class ProjectsService {
         'screenshot1Url',
         'screenshot2Url',
         'hackatimeProjectName',
+        'status',
+        'isUpdate',
+        'otherHcProgram',
         'createdAt',
         'updatedAt',
       ],
@@ -134,6 +140,99 @@ export class ProjectsService {
   async userHasProjects(userId: string): Promise<boolean> {
     const count = await this.projectRepo.count({ where: { userId } });
     return count > 0;
+  }
+
+  async update(
+    projectId: string,
+    dto: UpdateProjectDto,
+    userId: string,
+    hcaSub: string,
+  ) {
+    const project = await this.projectRepo.findOne({
+      where: { id: projectId, userId },
+    });
+    if (!project) throw new NotFoundException('Project not found');
+
+    if (dto.name !== undefined) {
+      project.name = this.requireString(dto.name, 'name', 50);
+    }
+    if (dto.description !== undefined) {
+      project.description = this.requireString(dto.description, 'description', 300);
+    }
+    if (dto.projectType !== undefined) {
+      project.projectType = this.validateProjectType(dto.projectType);
+    }
+    if (dto.codeUrl !== undefined) {
+      project.codeUrl = dto.codeUrl === null ? null : this.validateUrl(dto.codeUrl, 'codeUrl');
+    }
+    if (dto.readmeUrl !== undefined) {
+      project.readmeUrl = dto.readmeUrl === null ? null : this.validateUrl(dto.readmeUrl, 'readmeUrl');
+    }
+    if (dto.demoUrl !== undefined) {
+      project.demoUrl = dto.demoUrl === null ? null : this.validateUrl(dto.demoUrl, 'demoUrl');
+    }
+    if (dto.screenshots !== undefined) {
+      const validated = this.validateScreenshots(dto.screenshots);
+      const screenshotUrls = await this.uploadScreenshots(validated);
+      project.screenshot1Url = screenshotUrls[0];
+      project.screenshot2Url = screenshotUrls[1];
+    }
+    if (dto.hackatimeProjectName !== undefined) {
+      if (dto.hackatimeProjectName === null || dto.hackatimeProjectName === '') {
+        project.hackatimeProjectName = null;
+      } else {
+        const cleaned = this.sanitize(dto.hackatimeProjectName).slice(0, 255);
+        if (cleaned) {
+          const realProjects =
+            await this.hackatimeService.getProjectNames(hcaSub);
+          if (!realProjects.includes(cleaned)) {
+            throw new BadRequestException(
+              'That Hackatime project was not found on your account',
+            );
+          }
+          project.hackatimeProjectName = cleaned;
+        }
+      }
+    }
+    if (dto.isUpdate !== undefined) {
+      project.isUpdate = dto.isUpdate === true;
+    }
+    if (dto.otherHcProgram !== undefined) {
+      project.otherHcProgram = dto.otherHcProgram === null ? null : this.validateOptionalString(dto.otherHcProgram, 'otherHcProgram', 255);
+    }
+    if (dto.status !== undefined) {
+      if (dto.status !== 'unreviewed') {
+        throw new BadRequestException('You can only submit a project for review');
+      }
+      project.status = 'unreviewed';
+    }
+
+    const saved = await this.projectRepo.save(project);
+
+    await this.auditLogService.log(
+      userId,
+      'project_updated',
+      `Updated project "${project.name}"`,
+    );
+
+    const { userId: _uid, user: _user, ...safe } = saved;
+    return safe;
+  }
+
+  async delete(projectId: string, userId: string) {
+    const project = await this.projectRepo.findOne({
+      where: { id: projectId, userId },
+    });
+    if (!project) throw new NotFoundException('Project not found');
+
+    const name = project.name;
+    await this.projectRepo.remove(project);
+
+    await this.auditLogService.log(
+      userId,
+      'project_deleted',
+      `Deleted project "${name}"`,
+    );
   }
 
   /* ------------------------------------------------------------------ */
@@ -164,6 +263,16 @@ export class ProjectsService {
       throw new BadRequestException(`${field} is required`);
     }
     return clean;
+  }
+
+  private validateOptionalString(
+    value: unknown,
+    field: string,
+    maxLen: number,
+  ): string | null {
+    if (!value || typeof value !== 'string') return null;
+    const clean = this.sanitize(value).slice(0, maxLen);
+    return clean.length === 0 ? null : clean;
   }
 
   private validateProjectType(value: unknown): string {
@@ -256,12 +365,6 @@ export class ProjectsService {
       // Decode to check real size and magic bytes
       const buffer = Buffer.from(b64Data, 'base64');
 
-      if (buffer.length > MAX_IMAGE_BYTES) {
-        throw new BadRequestException(
-          `Screenshot ${i + 1} exceeds 5 MB limit`,
-        );
-      }
-
       // Verify magic bytes match declared MIME type
       const sig = IMAGE_SIGNATURES.find((s) => s.mime === declaredMime);
       if (!sig || !b64Data.startsWith(sig.b64Prefix)) {
@@ -294,11 +397,19 @@ export class ProjectsService {
       const formData = new FormData();
       formData.append('file', blob, filename);
 
-      const res = await fetchWithTimeout(CDN_UPLOAD_URL, {
-        method: 'POST',
-        headers: { Authorization: `Bearer ${this.cdnApiKey}` },
-        body: formData,
-      });
+      let res: Response;
+      try {
+        res = await fetchWithTimeout(CDN_UPLOAD_URL, {
+          method: 'POST',
+          headers: { Authorization: `Bearer ${this.cdnApiKey}` },
+          body: formData,
+        });
+      } catch (err) {
+        this.logger.error(`CDN upload network error for screenshot ${i + 1}: ${err}`);
+        throw new BadRequestException(
+          `Screenshot upload failed — the CDN is unreachable. Try again without a screenshot.`,
+        );
+      }
 
       if (!res.ok) {
         const err = await res.text().catch(() => '');

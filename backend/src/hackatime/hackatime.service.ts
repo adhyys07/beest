@@ -167,12 +167,13 @@ export class HackatimeService {
     });
 
     if (!user?.hackatimeToken) {
+      this.logger.warn(`No hackatime token found for user ${userId} (user found: ${!!user})`);
       return [];
     }
 
     try {
       const res = await fetchWithTimeout(
-        `${this.baseUrl}/api/v1/users/current/projects`,
+        `${this.baseUrl}/api/v1/authenticated/projects`,
         {
           headers: { Authorization: `Bearer ${user.hackatimeToken}` },
         },
@@ -186,7 +187,7 @@ export class HackatimeService {
       }
 
       const data = await res.json();
-      const projects: { name: string }[] = data?.data ?? data ?? [];
+      const projects: { name: string }[] = data?.projects ?? data?.data ?? [];
 
       if (!Array.isArray(projects)) return [];
 
@@ -222,7 +223,7 @@ export class HackatimeService {
 
     try {
       const res = await fetchWithTimeout(
-        `${this.baseUrl}/api/v1/users/current/stats/all_time`,
+        `${this.baseUrl}/api/v1/authenticated/projects`,
         {
           headers: { Authorization: `Bearer ${user.hackatimeToken}` },
         },
@@ -237,7 +238,7 @@ export class HackatimeService {
 
       const body = await res.json().catch(() => null);
       const projects: { name: string; total_seconds: number }[] =
-        body?.data?.projects ?? [];
+        body?.projects ?? [];
 
       if (!Array.isArray(projects)) {
         return { totalSeconds: 0, hours: 0 };

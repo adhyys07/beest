@@ -2,7 +2,10 @@ import {
   Controller,
   Post,
   Get,
+  Patch,
+  Delete,
   Body,
+  Param,
   Req,
   UseGuards,
   UnauthorizedException,
@@ -13,6 +16,7 @@ import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import { HackatimeService } from '../hackatime/hackatime.service';
 import { ProjectsService } from './projects.service';
 import { CreateProjectDto } from './create-project.dto';
+import { UpdateProjectDto } from './update-project.dto';
 
 @Controller('api/projects')
 export class ProjectsController {
@@ -58,5 +62,30 @@ export class ProjectsController {
     if (!userId) throw new UnauthorizedException('No user identity');
 
     return this.projectsService.findByUser(userId);
+  }
+
+  @Throttle({ default: { limit: 10, ttl: 60000 } })
+  @UseGuards(JwtAuthGuard)
+  @Patch(':id')
+  async update(
+    @Param('id') id: string,
+    @Req() req: Request,
+    @Body() dto: UpdateProjectDto,
+  ) {
+    const user = (req as any).user;
+    if (!user?.uid) throw new UnauthorizedException('No user identity');
+
+    return this.projectsService.update(id, dto, user.uid, user.sub);
+  }
+
+  @Throttle({ default: { limit: 10, ttl: 60000 } })
+  @UseGuards(JwtAuthGuard)
+  @Delete(':id')
+  async delete(@Param('id') id: string, @Req() req: Request) {
+    const user = (req as any).user;
+    if (!user?.uid) throw new UnauthorizedException('No user identity');
+
+    await this.projectsService.delete(id, user.uid);
+    return { deleted: true };
   }
 }

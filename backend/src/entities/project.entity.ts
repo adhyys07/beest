@@ -9,6 +9,15 @@ import {
 } from 'typeorm';
 import { User } from './user.entity';
 
+export const VALID_PROJECT_STATUSES = [
+  'unshipped',
+  'unreviewed',
+  'changes_needed',
+  'approved',
+] as const;
+
+export type ProjectStatus = (typeof VALID_PROJECT_STATUSES)[number];
+
 export const VALID_PROJECT_TYPES = [
   'web',
   'windows',
@@ -60,6 +69,15 @@ export class Project {
 
   @Column({ type: 'varchar', name: 'hackatime_project_name', length: 255, nullable: true })
   hackatimeProjectName: string | null;
+
+  @Column({ name: 'status', length: 20, default: 'unshipped' })
+  status: string;
+
+  @Column({ name: 'is_update', default: false })
+  isUpdate: boolean;
+
+  @Column({ type: 'varchar', name: 'other_hc_program', length: 255, nullable: true })
+  otherHcProgram: string | null;
 
   @CreateDateColumn({ name: 'created_at' })
   createdAt: Date;
