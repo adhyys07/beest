@@ -14,6 +14,7 @@ import { Session } from './entities/session.entity';
 import { Project } from './entities/project.entity';
 import { AuditLog } from './entities/audit-log.entity';
 import { NewsItem } from './entities/news-item.entity';
+import { ProjectReview } from './entities/project-review.entity';
 import { HealthController } from './health.controller';
 
 @Module({
@@ -26,7 +27,7 @@ import { HealthController } from './health.controller';
       useFactory: (config: ConfigService) => ({
         type: 'postgres',
         url: config.getOrThrow('DATABASE_URL'),
-        entities: [User, Session, Project, AuditLog, NewsItem],
+        entities: [User, Session, Project, AuditLog, NewsItem, ProjectReview],
         migrations: [__dirname + '/migrations/*{.ts,.js}'],
         migrationsRun: true,
         synchronize: false,

@@ -37,6 +37,7 @@
   let usedAi = $state(false);
   let aiUseDescription = $state('');
   let projects = $state<any[]>([]);
+  let catImages = $state<Record<string, string>>({});
   let hackatimeProjects = $state<string[]>([]);
   let hackatimeLoading = $state(false);
   let hackatimeOpen = $state(false);
@@ -184,6 +185,14 @@
       if (res.ok) {
         const data = await res.json();
         projects = Array.isArray(data) ? data : [];
+        // Fetch cat placeholder images for projects without screenshots
+        for (const p of projects) {
+          if (!p.screenshot1Url) {
+            fetch('/api/cat').then(r => r.json()).then(d => {
+              if (d?.url) catImages = { ...catImages, [p.id]: d.url };
+            }).catch(() => {});
+          }
+        }
       }
     } catch { /* silent */ }
   }
@@ -702,19 +711,25 @@
             {#if submitting}{editingProject ? 'Saving...' : 'Creating...'}{:else}{editingProject ? 'Save Changes' : 'Create Project'}{/if}
           </button>
           {#if editingProject}
-            <div class="submit-review-wrap">
-              <button
-                class="form-btn-review"
-                class:ready={canSubmitForReview}
-                disabled={!canSubmitForReview}
-                onclick={submitForReview}
-              >
-                Submit
-              </button>
-              {#if !canSubmitForReview}
-                <span class="review-tooltip">Fill out all sections before submitting</span>
-              {/if}
-            </div>
+            {#if editingProject.status === 'unreviewed'}
+              <div class="in-review-notice">
+                <p class="in-review-text">This project is currently in review. You can still work on it and track hours, but you can't resubmit until it's been reviewed.</p>
+              </div>
+            {:else}
+              <div class="submit-review-wrap">
+                <button
+                  class="form-btn-review"
+                  class:ready={canSubmitForReview}
+                  disabled={!canSubmitForReview}
+                  onclick={submitForReview}
+                >
+                  Submit
+                </button>
+                {#if !canSubmitForReview}
+                  <span class="review-tooltip">Fill out all sections before submitting</span>
+                {/if}
+              </div>
+            {/if}
           {/if}
         </div>
       </div>
@@ -815,9 +830,11 @@
           {:else}
             {#each projects as project}
               {@const isMobile = project.projectType === 'android' || project.projectType === 'ios'}
-              <div class="project-card" class:landscape={!isMobile} role="button" tabindex="0" onclick={() => openEditProject(project)} onkeydown={(e) => { if (e.key === 'Enter') openEditProject(project); }}>
+              <div class="project-card status-{project.status}" class:landscape={!isMobile} role="button" tabindex="0" onclick={() => openEditProject(project)} onkeydown={(e) => { if (e.key === 'Enter') openEditProject(project); }}>
                 {#if project.screenshot1Url}
                   <img class="project-thumb" src={project.screenshot1Url} alt="{project.name} screenshot" />
+                {:else if catImages[project.id]}
+                  <img class="project-thumb project-thumb-cat" src={catImages[project.id]} alt="Placeholder cat" />
                 {/if}
                 <div class="project-info">
                   <div class="project-header-row">
@@ -2020,6 +2037,22 @@
     cursor: not-allowed;
   }
 
+  .in-review-notice {
+    background: rgba(203, 193, 174, 0.15);
+    border: 2px solid #cbc1ae;
+    clip-path: polygon(0% 2%, 3% 0%, 97% 1%, 100% 3%, 99% 97%, 96% 100%, 4% 99%, 0% 96%);
+    padding: 12px 16px;
+  }
+
+  .in-review-text {
+    margin: 0;
+    font-family: "Courier New", monospace;
+    font-size: 14px;
+    color: #cbc1ae;
+    line-height: 1.4;
+    text-shadow: 2px 2px 0 rgba(0, 0, 0, 0.3);
+  }
+
   .submit-review-wrap {
     position: relative;
   }
@@ -2688,11 +2721,40 @@
     background: rgba(160, 150, 132, 0.95);
   }
 
+  .project-card.status-unshipped {
+    background: rgba(196, 131, 130, 0.45);
+    border-color: rgba(196, 131, 130, 0.4);
+  }
+  .project-card.status-unshipped:hover { background: rgba(196, 131, 130, 0.55); }
+
+  .project-card.status-unreviewed {
+    background: rgba(203, 193, 174, 0.5);
+    border-color: rgba(203, 193, 174, 0.4);
+  }
+  .project-card.status-unreviewed:hover { background: rgba(203, 193, 174, 0.6); }
+
+  .project-card.status-changes_needed {
+    background: rgba(212, 165, 90, 0.45);
+    border-color: rgba(212, 165, 90, 0.4);
+  }
+  .project-card.status-changes_needed:hover { background: rgba(212, 165, 90, 0.55); }
+
+  .project-card.status-approved {
+    background: rgba(147, 180, 205, 0.45);
+    border-color: rgba(147, 180, 205, 0.4);
+  }
+  .project-card.status-approved:hover { background: rgba(147, 180, 205, 0.55); }
+
 
   .project-thumb {
     object-fit: cover;
     flex-shrink: 0;
     border-radius: 4px;
+  }
+
+  .project-thumb-cat {
+    max-width: 50%;
+    opacity: 0.7;
   }
 
   /* portrait: mobile apps — side thumbnail */

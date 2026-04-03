@@ -12,8 +12,12 @@ import {
 } from '@nestjs/common';
 import { Throttle } from '@nestjs/throttler';
 import type { Request } from 'express';
+import { InjectRepository } from '@nestjs/typeorm';
+import { Repository } from 'typeorm';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import { HackatimeService } from '../hackatime/hackatime.service';
+import { Project } from '../entities/project.entity';
+import { ProjectReview } from '../entities/project-review.entity';
 import { ProjectsService } from './projects.service';
 import { CreateProjectDto } from './create-project.dto';
 import { UpdateProjectDto } from './update-project.dto';
@@ -23,6 +27,8 @@ export class ProjectsController {
   constructor(
     private readonly projectsService: ProjectsService,
     private readonly hackatimeService: HackatimeService,
+    @InjectRepository(Project) private readonly projectRepo: Repository<Project>,
+    @InjectRepository(ProjectReview) private readonly reviewRepo: Repository<ProjectReview>,
   ) {}
 
   /**
@@ -103,5 +109,35 @@ export class ProjectsController {
 
     await this.projectsService.delete(id, user.uid);
     return { deleted: true };
+  }
+
+  @Throttle({ default: { limit: 30, ttl: 60000 } })
+  @UseGuards(JwtAuthGuard)
+  @Get(':id/reviews')
+  async getReviews(@Param('id') id: string, @Req() req: Request) {
+    const userId = (req as any).user?.uid;
+    if (!userId) throw new UnauthorizedException('No user identity');
+
+    // Verify the project belongs to the authenticated user
+    const project = await this.projectRepo.findOne({
+      where: { id, userId },
+      select: ['id'],
+    });
+    if (!project) throw new UnauthorizedException('Project not found');
+
+    const reviews = await this.reviewRepo.find({
+      where: { projectId: id },
+      order: { createdAt: 'DESC' },
+      relations: ['reviewer'],
+    });
+
+    // Never expose internal notes to the user
+    return reviews.map((r) => ({
+      id: r.id,
+      status: r.status,
+      feedback: r.feedback,
+      reviewerName: r.reviewer?.name ?? null,
+      createdAt: r.createdAt,
+    }));
   }
 }

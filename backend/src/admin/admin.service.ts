@@ -12,7 +12,9 @@ import { Session } from '../entities/session.entity';
 import { Project } from '../entities/project.entity';
 import { AuditLog } from '../entities/audit-log.entity';
 import { NewsItem } from '../entities/news-item.entity';
+import { ProjectReview } from '../entities/project-review.entity';
 import { RsvpService } from '../rsvp/rsvp.service';
+import { AuditLogService } from '../audit-log/audit-log.service';
 import { fetchWithTimeout } from '../fetch.util';
 
 const VALID_PERMS = [
@@ -39,7 +41,9 @@ export class AdminService {
     @InjectRepository(Project) private readonly projectRepo: Repository<Project>,
     @InjectRepository(AuditLog) private readonly auditLogRepo: Repository<AuditLog>,
     @InjectRepository(NewsItem) private readonly newsRepo: Repository<NewsItem>,
+    @InjectRepository(ProjectReview) private readonly reviewRepo: Repository<ProjectReview>,
     private readonly rsvpService: RsvpService,
+    private readonly auditLogService: AuditLogService,
   ) {
     this.hackatimeBaseUrl = this.configService.get(
       'HACKATIME_BASE_URL',
@@ -129,6 +133,44 @@ export class AdminService {
     await this.sessionRepo.delete({ userId });
   }
 
+  async banAndRejectProject(
+    projectId: string,
+    reviewerId: string,
+    feedback: string | null,
+    internalNote: string | null,
+    overrideJustification: string | null,
+  ) {
+    const project = await this.projectRepo.findOne({
+      where: { id: projectId },
+      relations: ['user'],
+    });
+    if (!project) throw new NotFoundException('Project not found');
+
+    // 1. Reject the project
+    project.status = 'changes_needed';
+    await this.projectRepo.save(project);
+
+    // 2. Save review record
+    const review = this.reviewRepo.create({
+      projectId,
+      reviewerId,
+      status: 'ban',
+      feedback: feedback || null,
+      internalNote: internalNote || null,
+      overrideJustification: overrideJustification || null,
+    });
+    await this.reviewRepo.save(review);
+
+    // 3. Ban the user
+    await this.banUser(project.userId);
+
+    // 4. Audit logs
+    await this.auditLogService.log(project.userId, 'project_reviewed', `Project "${project.name}" was rejected`);
+    await this.auditLogService.log(project.userId, 'admin_ban', `Banned via project review of "${project.name}"`);
+
+    return { success: true };
+  }
+
   async updatePerms(userId: string, perms: string): Promise<void> {
     if (!VALID_PERMS.includes(perms as any)) {
       throw new BadRequestException(
@@ -189,11 +231,69 @@ export class AdminService {
     return { statusCounts, projects: mapped };
   }
 
-  async setProjectStatus(projectId: string, status: string): Promise<void> {
-    const project = await this.projectRepo.findOne({ where: { id: projectId } });
+  async reviewProject(
+    projectId: string,
+    reviewerId: string,
+    status: string,
+    feedback: string | null,
+    internalNote: string | null,
+    overrideJustification: string | null,
+    overrideHours: number | null,
+    internalHours: number | null,
+  ) {
+    const project = await this.projectRepo.findOne({
+      where: { id: projectId },
+      relations: ['user'],
+    });
     if (!project) throw new NotFoundException('Project not found');
+
+    // 1. Update project status and hours
     project.status = status;
+    if (overrideHours !== null && overrideHours !== undefined) {
+      project.overrideHours = Math.round(overrideHours * 10) / 10;
+    }
+    if (internalHours !== null && internalHours !== undefined) {
+      project.internalHours = Math.round(internalHours * 10) / 10;
+    }
     await this.projectRepo.save(project);
+
+    // 2. Save the review record
+    const review = this.reviewRepo.create({
+      projectId,
+      reviewerId,
+      status,
+      feedback: feedback || null,
+      internalNote: internalNote || null,
+      overrideJustification: overrideJustification || null,
+    });
+    await this.reviewRepo.save(review);
+
+    // 3. Audit log to the project owner (not the reviewer)
+    const label =
+      status === 'approved'
+        ? `Project "${project.name}" was approved`
+        : `Project "${project.name}" received feedback`;
+    await this.auditLogService.log(project.userId, 'project_reviewed', label);
+
+    return { success: true };
+  }
+
+  async getProjectReviews(projectId: string, includeInternal: boolean) {
+    const reviews = await this.reviewRepo.find({
+      where: { projectId },
+      order: { createdAt: 'DESC' },
+      relations: ['reviewer'],
+    });
+
+    return reviews.map((r) => ({
+      id: r.id,
+      status: r.status,
+      feedback: r.feedback,
+      ...(includeInternal ? { internalNote: r.internalNote } : {}),
+      overrideJustification: r.overrideJustification,
+      reviewerName: r.reviewer?.name ?? null,
+      createdAt: r.createdAt,
+    }));
   }
 
   // ── Unified Airtable duplicate check ──
@@ -235,17 +335,19 @@ export class AdminService {
         maxRecords: '1',
         'fields[]': 'Code URL',
       });
-      const res = await fetchWithTimeout(
-        `https://api.airtable.com/v0/${this.unifiedBaseId}/Approved%20Projects?${params}`,
-        {
-          headers: { Authorization: `Bearer ${this.unifiedApiKey}` },
-        },
-      );
+      const url = `https://api.airtable.com/v0/${this.unifiedBaseId}/Approved%20Projects?${params}`;
+      this.logger.log(`Unified check: formula=${formula}`);
+      const res = await fetchWithTimeout(url, {
+        headers: { Authorization: `Bearer ${this.unifiedApiKey}` },
+      });
       if (!res.ok) {
+        const body = await res.text();
+        this.logger.warn(`Unified check failed (${res.status}): ${body}`);
         return { duplicate: false, error: true };
       }
       const data = await res.json();
       const records: any[] = data?.records ?? [];
+      this.logger.log(`Unified check: ${records.length} records found`);
       // Only expose match/no-match — never leak record contents
       return { duplicate: records.length > 0, error: false };
     } catch {

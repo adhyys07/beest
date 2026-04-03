@@ -80,6 +80,12 @@ export class Project {
   @Column({ name: 'status', length: 20, default: 'unshipped' })
   status: string;
 
+  @Column({ type: 'real', name: 'override_hours', nullable: true })
+  overrideHours: number | null;
+
+  @Column({ type: 'real', name: 'internal_hours', nullable: true })
+  internalHours: number | null;
+
   @Column({ name: 'is_update', default: false })
   isUpdate: boolean;
 

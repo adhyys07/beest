@@ -95,26 +95,58 @@
 	let hackatimeLoading = $state(false);
 	let overrideJustification = $state('');
 	let userFeedback = $state('');
+	let internalNote = $state('');
 	let reviewSubmitting = $state(false);
 	let customHours = $state(0);
+	let userFacingHours = $state(0);
 
 	let selectedProject = $derived(allProjects.find(p => p.id === expandedProjectId) ?? null);
 
-	async function reviewProject(status: 'approved' | 'changes_needed') {
+	interface ReviewRecord {
+		id: string;
+		status: string;
+		feedback: string | null;
+		internalNote?: string | null;
+		overrideJustification: string | null;
+		reviewerName: string | null;
+		createdAt: string;
+	}
+	let pastReviews = $state<ReviewRecord[]>([]);
+
+	async function reviewProject(status: 'approved' | 'changes_needed' | 'ban') {
 		if (!expandedProjectId || reviewSubmitting) return;
 		reviewSubmitting = true;
 		try {
 			const res = await fetch(`/api/admin/projects/${expandedProjectId}/review`, {
 				method: 'POST',
 				headers: { 'Content-Type': 'application/json' },
-				body: JSON.stringify({ status }),
+				body: JSON.stringify({
+					status,
+					feedback: userFeedback.trim() || null,
+					internalNote: internalNote.trim() || null,
+					overrideJustification: overrideJustification.trim() || null,
+					overrideHours: userFacingHours,
+					internalHours: customHours,
+				}),
 			});
 			if (res.ok) {
 				const proj = allProjects.find(p => p.id === expandedProjectId);
 				if (proj) proj.status = status;
+				// Reload reviews
+				await loadReviews(expandedProjectId);
 			}
 		} finally {
 			reviewSubmitting = false;
+		}
+	}
+
+	async function loadReviews(projectId: string) {
+		try {
+			const res = await fetch(`/api/admin/projects/${projectId}/reviews`);
+			if (res.ok) pastReviews = await res.json();
+			else pastReviews = [];
+		} catch {
+			pastReviews = [];
 		}
 	}
 
@@ -146,14 +178,18 @@
 			expandedProjectId = null;
 			hackatimeData = null;
 			userFeedback = '';
+		internalNote = '';
 			return;
 		}
 		expandedProjectId = projectId;
 		hackatimeData = null;
 		userFeedback = '';
+		internalNote = '';
 		overrideJustification = '';
+		pastReviews = [];
 
 		const proj = allProjects.find(p => p.id === projectId);
+		loadReviews(projectId);
 		if (proj?.status === 'unreviewed') {
 			hackatimeLoading = true;
 			try {
@@ -161,10 +197,11 @@
 				if (res.ok) {
 					hackatimeData = await res.json();
 					customHours = hackatimeData?.totalHours ?? 0;
+					userFacingHours = hackatimeData?.totalHours ?? 0;
 					const trustLabels: Record<string, string> = { blue: 'standard', yellow: 'warned', red: 'banned' };
 					const trustLabel = trustLabels[hackatimeData?.trustLevel?.toLowerCase() ?? ''] ?? hackatimeData?.trustLevel ?? 'unknown';
 					const updateNote = proj.isUpdate ? ' (this is an update to an existing project)' : '';
-					const unifiedNote = !hackatimeData?.unifiedDuplicate && proj.codeUrl
+					const unifiedNote = !hackatimeData?.unifiedDuplicate && !hackatimeData?.unifiedError && proj.codeUrl
 						? `\nAs of ${new Date().toLocaleDateString('en-US', { year: 'numeric', month: 'short', day: 'numeric' })} this is the first submission of this code URL to unified.`
 						: '';
 					overrideJustification = `the user has trust level ${trustLabel} and tracked ${hackatimeData?.totalHours ?? 0} hours on the project through hackatime${updateNote}${unifiedNote}\n\nsigned off by ${data.user.name ?? 'unknown'}`;
@@ -639,45 +676,52 @@
 
 						<div class="proj-main">
 							{#if selectedProject}
-								<div class="proj-main-header">
-									<h3 class="proj-main-title">{selectedProject.name}</h3>
-									<span class="badge badge-{selectedProject.status}">{selectedProject.status}</span>
-								</div>
+								<div class="proj-top-row">
+									<div class="proj-top-info">
+										<div class="proj-main-header">
+											<h3 class="proj-main-title">{selectedProject.name}</h3>
+											<span class="badge badge-{selectedProject.status}">{selectedProject.status}</span>
+										</div>
 
-								<p class="proj-main-desc">{selectedProject.description}</p>
+										<p class="proj-main-desc">{selectedProject.description}</p>
 
-								<div class="proj-main-meta">
-									<span>Type: <strong>{selectedProject.projectType}</strong></span>
-									<span>User: <strong>{selectedProject.user.name ?? '—'}</strong>{selectedProject.user.slackId ? ` (${selectedProject.user.slackId})` : ''}</span>
-									<span>Update: <strong>{selectedProject.isUpdate ? 'Yes' : 'No'}</strong></span>
-									<span>Created: <strong>{formatDate(selectedProject.createdAt)}</strong></span>
-								</div>
+										<div class="proj-main-meta">
+											<span>Type: <strong>{selectedProject.projectType}</strong></span>
+											<span>User: <strong>{selectedProject.user.name ?? '—'}</strong>{selectedProject.user.slackId ? ` (${selectedProject.user.slackId})` : ''}</span>
+											<span>Update: <strong>{selectedProject.isUpdate ? 'Yes' : 'No'}</strong></span>
+											<span>Created: <strong>{formatDate(selectedProject.createdAt)}</strong></span>
+										</div>
 
-								<div class="ht-actions">
-									{#if selectedProject.codeUrl}
-										<a href={selectedProject.codeUrl} target="_blank" rel="noopener" class="ht-btn ht-btn-github">GitHub</a>
-									{/if}
-									{#if selectedProject.demoUrl}
-										<a href={selectedProject.demoUrl} target="_blank" rel="noopener" class="ht-btn ht-btn-demo">Demo</a>
-									{/if}
-									{#if selectedProject.readmeUrl}
-										<a href={selectedProject.readmeUrl} target="_blank" rel="noopener" class="ht-btn ht-btn-readme">README</a>
-									{/if}
-									{#if !selectedProject.codeUrl && !selectedProject.demoUrl && !selectedProject.readmeUrl}
-										<span class="ht-empty">No links provided</span>
-									{/if}
-								</div>
-
-								{#if selectedProject.screenshot1Url || selectedProject.screenshot2Url}
-									<div class="proj-screenshots">
-										{#if selectedProject.screenshot1Url}
-											<img src={selectedProject.screenshot1Url} alt="Screenshot 1" class="proj-screenshot" />
-										{/if}
-										{#if selectedProject.screenshot2Url}
-											<img src={selectedProject.screenshot2Url} alt="Screenshot 2" class="proj-screenshot" />
-										{/if}
+										<div class="ht-actions">
+											{#if selectedProject.codeUrl}
+												<a href={selectedProject.codeUrl} target="_blank" rel="noopener" class="ht-btn ht-btn-github">GitHub</a>
+											{/if}
+											{#if selectedProject.demoUrl}
+												<a href={selectedProject.demoUrl} target="_blank" rel="noopener" class="ht-btn ht-btn-demo">Demo</a>
+											{/if}
+											{#if selectedProject.readmeUrl}
+												<a href={selectedProject.readmeUrl} target="_blank" rel="noopener" class="ht-btn ht-btn-readme">README</a>
+											{/if}
+											{#if !selectedProject.codeUrl && !selectedProject.demoUrl && !selectedProject.readmeUrl}
+												<span class="ht-empty">No links provided</span>
+											{/if}
+											{#if selectedProject.status === 'unreviewed'}
+												<a href="https://hack-club-hq.gitbook.io/ysws-project-submission-guidelines/BLBRN8LIfoCZhFV6oMNR" target="_blank" rel="noopener" class="ht-btn ht-btn-docs">Open Docs</a>
+											{/if}
+										</div>
 									</div>
-								{/if}
+
+									{#if selectedProject.screenshot1Url || selectedProject.screenshot2Url}
+										<div class="proj-screenshots">
+											{#if selectedProject.screenshot1Url}
+												<img src={selectedProject.screenshot1Url} alt="Screenshot 1" class="proj-screenshot" />
+											{/if}
+											{#if selectedProject.screenshot2Url}
+												<img src={selectedProject.screenshot2Url} alt="Screenshot 2" class="proj-screenshot" />
+											{/if}
+										</div>
+									{/if}
+								</div>
 
 								{#if selectedProject.hackatimeProjectName?.length > 0}
 									<div class="proj-info-row">
@@ -700,8 +744,6 @@
 
 								{#if selectedProject.status === 'unreviewed'}
 									<hr class="proj-divider" />
-
-									<a href="https://hack-club-hq.gitbook.io/ysws-project-submission-guidelines/BLBRN8LIfoCZhFV6oMNR" target="_blank" rel="noopener" class="ht-btn ht-btn-docs" style="display:inline-flex; margin-bottom: 0.75rem;">Open Docs</a>
 
 									{#if hackatimeLoading}
 										<span class="ht-loading">Loading Hackatime data...</span>
@@ -733,13 +775,13 @@
 											{/if}
 											<label class="ht-justification-label">
 												Override Justification:
-												<textarea class="ht-justification" bind:value={overrideJustification} rows="3"></textarea>
+												<textarea class="ht-justification" bind:value={overrideJustification} rows="6"></textarea>
 											</label>
 										</div>
 									{/if}
 
 									<div class="hours-adjust">
-										<span class="hours-adjust-label">Adjust Hours:</span>
+										<span class="hours-adjust-label">Internal:</span>
 										<button class="hours-btn" onclick={() => adjustHours(0.5)}>Halve</button>
 										<button class="hours-btn" onclick={() => adjustHours(1/3)}>Third</button>
 										<button class="hours-btn" onclick={() => adjustHours(0.25)}>Quarter</button>
@@ -747,6 +789,16 @@
 											<button class="hours-tick" onclick={() => { customHours = Math.max(0, Math.round((customHours - 1) * 10) / 10); applyCustomHours(); }}>-</button>
 											<input type="number" class="hours-input" bind:value={customHours} onchange={applyCustomHours} min="0" step="0.1" />
 											<button class="hours-tick" onclick={() => { customHours = Math.round((customHours + 1) * 10) / 10; applyCustomHours(); }}>+</button>
+										</div>
+										<span class="hours-adjust-divider">|</span>
+										<span class="hours-adjust-label">User Facing:</span>
+										<button class="hours-btn" onclick={() => { userFacingHours = Math.round(userFacingHours * 0.5 * 10) / 10; }}>Halve</button>
+										<button class="hours-btn" onclick={() => { userFacingHours = Math.round(userFacingHours * (1/3) * 10) / 10; }}>Third</button>
+										<button class="hours-btn" onclick={() => { userFacingHours = Math.round(userFacingHours * 0.25 * 10) / 10; }}>Quarter</button>
+										<div class="hours-custom">
+											<button class="hours-tick" onclick={() => { userFacingHours = Math.max(0, Math.round((userFacingHours - 1) * 10) / 10); }}>-</button>
+											<input type="number" class="hours-input" bind:value={userFacingHours} min="0" step="0.1" />
+											<button class="hours-tick" onclick={() => { userFacingHours = Math.round((userFacingHours + 1) * 10) / 10; }}>+</button>
 										</div>
 									</div>
 
@@ -759,10 +811,50 @@
 										</label>
 									</div>
 
+									<div class="user-feedback-box">
+										<label class="user-feedback-label">
+											Internal Note:
+											<textarea class="user-feedback" bind:value={internalNote} rows="3" placeholder="Private note for reviewers only — not visible to the user..."></textarea>
+										</label>
+									</div>
+
 									<div class="review-actions">
 										<button class="review-btn review-btn-approve" onclick={() => reviewProject('approved')} disabled={reviewSubmitting}>Approve</button>
-										<button class="review-btn review-btn-reject" onclick={() => reviewProject('changes_needed')} disabled={reviewSubmitting}>Reject</button>
+										<button class="review-btn review-btn-reject" onclick={() => reviewProject('changes_needed')} disabled={reviewSubmitting || !userFeedback.trim()}>Reject</button>
+										<button class="review-btn review-btn-ban" onclick={() => { if (confirm('Ban this user and reject their project?')) reviewProject('ban'); }} disabled={reviewSubmitting}>Fail &amp; Ban</button>
 									</div>
+								{/if}
+
+								{#if pastReviews.length > 0}
+									<hr class="proj-divider" />
+									<h4 class="reviews-heading">Review History</h4>
+									{#each pastReviews as review}
+										<div class="review-card review-card-{review.status}">
+											<div class="review-card-header">
+												<span class="badge badge-{review.status} badge-sm">{review.status}</span>
+												<span class="review-card-reviewer">{review.reviewerName ?? 'Unknown'}</span>
+												<span class="review-card-date">{formatDate(review.createdAt)}</span>
+											</div>
+											{#if review.feedback}
+												<div class="review-card-section">
+													<span class="review-card-label">Feedback:</span>
+													<p class="review-card-text">{review.feedback}</p>
+												</div>
+											{/if}
+											{#if review.internalNote}
+												<div class="review-card-section review-card-internal">
+													<span class="review-card-label">Internal Note:</span>
+													<p class="review-card-text">{review.internalNote}</p>
+												</div>
+											{/if}
+											{#if review.overrideJustification}
+												<div class="review-card-section">
+													<span class="review-card-label">Justification:</span>
+													<p class="review-card-text">{review.overrideJustification}</p>
+												</div>
+											{/if}
+										</div>
+									{/each}
 								{/if}
 							{:else}
 								<div class="proj-main-empty">
@@ -783,13 +875,14 @@
 		background: #1a1a1a;
 		color: #e0e0e0;
 		font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+		font-size: 13px;
 	}
 
 	.admin-header {
 		display: flex;
 		justify-content: space-between;
 		align-items: center;
-		padding: 1rem 2rem;
+		padding: 0.6rem 1.5rem;
 		background: #111;
 		border-bottom: 1px solid #333;
 	}
@@ -828,7 +921,7 @@
 	.tab.active { color: #fff; border-bottom-color: #5b9bd5; }
 
 	.admin-content {
-		padding: 1.5rem 2rem;
+		padding: 1rem 1.5rem;
 	}
 
 	.users-layout {
@@ -1262,15 +1355,13 @@
 		border: 2px solid #777;
 		border-radius: 8px;
 		overflow: hidden;
-		min-height: 70vh;
+		min-height: 300px;
 	}
 
 	.proj-sidebar {
-		width: 340px;
+		width: 280px;
 		flex-shrink: 0;
 		background: #1e1e1e;
-		overflow-y: auto;
-		max-height: 80vh;
 	}
 
 	.proj-sidebar-item {
@@ -1278,7 +1369,7 @@
 		flex-direction: column;
 		gap: 0.2rem;
 		width: 100%;
-		padding: 0.65rem 0.85rem;
+		padding: 0.45rem 0.7rem;
 		border: none;
 		border-bottom: 1px solid #333;
 		background: transparent;
@@ -1321,9 +1412,7 @@
 	.proj-main {
 		flex: 1;
 		background: #252525;
-		padding: 1.25rem 1.5rem;
-		overflow-y: auto;
-		max-height: 80vh;
+		padding: 0.85rem 1.1rem;
 	}
 
 	.proj-main-empty {
@@ -1368,15 +1457,27 @@
 		color: #e0e0e0;
 	}
 
+	.proj-top-row {
+		display: flex;
+		gap: 1rem;
+		align-items: flex-start;
+	}
+
+	.proj-top-info {
+		flex: 1;
+		min-width: 0;
+	}
+
 	.proj-screenshots {
 		display: flex;
-		gap: 0.75rem;
-		margin: 1rem 0;
+		flex-direction: column;
+		gap: 0.5rem;
+		flex-shrink: 0;
 	}
 
 	.proj-screenshot {
-		max-width: 280px;
-		max-height: 200px;
+		max-width: 180px;
+		max-height: 130px;
 		border: 2px solid #555;
 		border-radius: 6px;
 		object-fit: cover;
@@ -1491,6 +1592,13 @@
 	.hours-adjust-label {
 		font-size: 0.8rem;
 		color: #aaa;
+		white-space: nowrap;
+	}
+
+	.hours-adjust-divider {
+		color: #555;
+		font-size: 1rem;
+		margin: 0 0.25rem;
 	}
 
 	.hours-btn {
@@ -1608,6 +1716,77 @@
 
 	.review-btn-reject {
 		background: #c44040;
+	}
+
+	.review-btn-ban {
+		background: #1a1a1a;
+		border: 2px solid #c44040;
+		color: #c44040;
+	}
+
+	.reviews-heading {
+		margin: 0 0 0.5rem;
+		font-size: 0.9rem;
+		color: #ccc;
+	}
+
+	.review-card {
+		border: 1px solid #444;
+		border-radius: 6px;
+		padding: 0.6rem 0.8rem;
+		margin-bottom: 0.5rem;
+		background: #1e1e1e;
+	}
+
+	.review-card-approved { border-left: 3px solid #4a9a5a; }
+	.review-card-changes_needed { border-left: 3px solid #c44040; }
+
+	.review-card-header {
+		display: flex;
+		align-items: center;
+		gap: 0.5rem;
+		margin-bottom: 0.35rem;
+		font-size: 0.75rem;
+	}
+
+	.review-card-reviewer {
+		color: #ccc;
+		font-weight: 600;
+	}
+
+	.review-card-date {
+		color: #777;
+		margin-left: auto;
+	}
+
+	.review-card-section {
+		margin-top: 0.3rem;
+	}
+
+	.review-card-label {
+		font-size: 0.7rem;
+		color: #888;
+		text-transform: uppercase;
+		letter-spacing: 0.03em;
+	}
+
+	.review-card-text {
+		margin: 0.15rem 0 0;
+		font-size: 0.8rem;
+		color: #ccc;
+		white-space: pre-wrap;
+		line-height: 1.4;
+	}
+
+	.review-card-internal {
+		background: rgba(212, 165, 90, 0.08);
+		border-radius: 4px;
+		padding: 0.3rem 0.5rem;
+		margin-top: 0.35rem;
+	}
+
+	.review-card-internal .review-card-label {
+		color: #d4a55a;
 	}
 
 	.ht-detail {

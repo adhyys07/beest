@@ -83,21 +83,47 @@ export class AdminController {
   @Post('projects/:id/review')
   async reviewProject(
     @Param('id', ParseUUIDPipe) id: string,
-    @Body() body: { status: string },
+    @Body() body: {
+      status?: string;
+      feedback?: string;
+      internalNote?: string;
+      overrideJustification?: string;
+      overrideHours?: number;
+      internalHours?: number;
+    },
     @Req() req: Request,
   ) {
-    const validStatuses = ['approved', 'changes_needed'];
-    if (!validStatuses.includes(body.status)) {
+    const validStatuses = ['approved', 'changes_needed', 'ban'];
+    if (!body.status || !validStatuses.includes(body.status)) {
       throw new BadRequestException(`status must be one of: ${validStatuses.join(', ')}`);
     }
-    const adminUid = (req as any).user?.uid;
-    await this.adminService.setProjectStatus(id, body.status);
-    await this.auditLogService.log(
-      adminUid,
-      'project_reviewed',
-      `Set project ${id} status to ${body.status}`,
+    const reviewerId = (req as any).user?.uid;
+
+    if (body.status === 'ban') {
+      return this.adminService.banAndRejectProject(
+        id,
+        reviewerId,
+        body.feedback ?? null,
+        body.internalNote ?? null,
+        body.overrideJustification ?? null,
+      );
+    }
+
+    return this.adminService.reviewProject(
+      id,
+      reviewerId,
+      body.status,
+      body.feedback ?? null,
+      body.internalNote ?? null,
+      body.overrideJustification ?? null,
+      body.overrideHours ?? null,
+      body.internalHours ?? null,
     );
-    return { success: true };
+  }
+
+  @Get('projects/:id/reviews')
+  getProjectReviews(@Param('id', ParseUUIDPipe) id: string) {
+    return this.adminService.getProjectReviews(id, true);
   }
 
   // ── News CRUD ──

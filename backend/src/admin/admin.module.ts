@@ -8,13 +8,14 @@ import { Session } from '../entities/session.entity';
 import { Project } from '../entities/project.entity';
 import { AuditLog } from '../entities/audit-log.entity';
 import { NewsItem } from '../entities/news-item.entity';
+import { ProjectReview } from '../entities/project-review.entity';
 import { AdminController } from './admin.controller';
 import { AdminService } from './admin.service';
 import { SuperAdminGuard } from './super-admin.guard';
 
 @Module({
   imports: [
-    TypeOrmModule.forFeature([User, Session, Project, AuditLog, NewsItem]),
+    TypeOrmModule.forFeature([User, Session, Project, AuditLog, NewsItem, ProjectReview]),
     AuthModule,
     RsvpModule,
     AuditLogModule,
