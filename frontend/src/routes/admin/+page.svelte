@@ -9,6 +9,7 @@
 		slackId: string | null;
 		email: string;
 		hackatimeConnected: boolean;
+		perms: string | null;
 		createdAt: string;
 	}
 
@@ -21,16 +22,53 @@
 		auditLogs: { id: string; action: string; label: string; createdAt: string }[];
 	}
 
+	interface NewsItem {
+		id: string;
+		text: string;
+		displayDate: string;
+	}
+
 	let activeTab = $state('users');
 	let users: UserSummary[] = $state([]);
 	let loading = $state(true);
+	let userSearch = $state('');
+	let permsFilter = $state('');
 	let selectedUser: UserSummary | null = $state(null);
 	let userDetail: UserDetail | null = $state(null);
 	let detailLoading = $state(false);
 	let showPermsDropdown = $state(false);
 	let actionLoading = $state('');
 
+	// News state
+	let newsItems: NewsItem[] = $state([]);
+	let newsLoading = $state(false);
+	let editingNews: NewsItem | null = $state(null);
+	let newNewsText = $state('');
+	let newNewsDate = $state('');
+	let newsSaving = $state(false);
+
+	function todayDateStr(): string {
+		const d = new Date();
+		return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+	}
+
 	const PERMS_OPTIONS = ['User', 'Helper', 'Reviewer', 'Fraud Reviewer', 'Super Admin', 'Banned'];
+
+	let filteredUsers = $derived.by(() => {
+		let result = users;
+		if (permsFilter) {
+			result = result.filter(u => u.perms === permsFilter);
+		}
+		if (userSearch.trim()) {
+			const q = userSearch.trim().toLowerCase();
+			result = result.filter(u =>
+				(u.name?.toLowerCase().includes(q)) ||
+				(u.email?.toLowerCase().includes(q)) ||
+				(u.slackId?.toLowerCase().includes(q))
+			);
+		}
+		return result;
+	});
 
 	async function loadUsers() {
 		loading = true;
@@ -99,8 +137,67 @@
 		});
 	}
 
+	async function loadNews() {
+		newsLoading = true;
+		try {
+			const res = await fetch('/api/admin/news');
+			if (res.ok) newsItems = await res.json();
+		} finally {
+			newsLoading = false;
+		}
+	}
+
+	async function createNews() {
+		if (!newNewsText.trim() || !newNewsDate.trim()) return;
+		newsSaving = true;
+		try {
+			const res = await fetch('/api/admin/news', {
+				method: 'POST',
+				headers: { 'Content-Type': 'application/json' },
+				body: JSON.stringify({ text: newNewsText, displayDate: newNewsDate })
+			});
+			if (res.ok) {
+				newNewsText = '';
+				newNewsDate = '';
+				await loadNews();
+			}
+		} finally {
+			newsSaving = false;
+		}
+	}
+
+	async function saveNewsEdit() {
+		if (!editingNews) return;
+		newsSaving = true;
+		try {
+			const res = await fetch(`/api/admin/news/${editingNews.id}`, {
+				method: 'PATCH',
+				headers: { 'Content-Type': 'application/json' },
+				body: JSON.stringify({ text: editingNews.text, displayDate: editingNews.displayDate })
+			});
+			if (res.ok) {
+				editingNews = null;
+				await loadNews();
+			}
+		} finally {
+			newsSaving = false;
+		}
+	}
+
+	async function deleteNews(id: string) {
+		if (!confirm('Delete this news item?')) return;
+		newsSaving = true;
+		try {
+			const res = await fetch(`/api/admin/news/${id}`, { method: 'DELETE' });
+			if (res.ok) await loadNews();
+		} finally {
+			newsSaving = false;
+		}
+	}
+
 	$effect(() => {
 		if (activeTab === 'users') loadUsers();
+		if (activeTab === 'news') loadNews();
 	});
 </script>
 
@@ -112,6 +209,7 @@
 
 	<nav class="admin-tabs">
 		<button class="tab" class:active={activeTab === 'users'} onclick={() => { activeTab = 'users'; closeDetail(); }}>Users</button>
+		<button class="tab" class:active={activeTab === 'news'} onclick={() => activeTab = 'news'}>News</button>
 		<button class="tab" class:active={activeTab === 'fulfillment'} onclick={() => activeTab = 'fulfillment'}>Fulfillment</button>
 		<button class="tab" class:active={activeTab === 'projects'} onclick={() => activeTab = 'projects'}>Projects</button>
 	</nav>
@@ -120,6 +218,15 @@
 		{#if activeTab === 'users'}
 			<div class="users-layout" class:has-detail={selectedUser}>
 				<div class="users-table-wrap">
+					<div class="users-toolbar">
+						<input type="text" placeholder="Search by name, email or Slack ID..." bind:value={userSearch} class="users-search" />
+						<select bind:value={permsFilter} class="users-perms-filter">
+							<option value="">All Permissions</option>
+							{#each PERMS_OPTIONS as perm}
+								<option value={perm}>{perm}</option>
+							{/each}
+						</select>
+					</div>
 					{#if loading}
 						<p class="loading">Loading users...</p>
 					{:else}
@@ -128,21 +235,21 @@
 								<tr>
 									<th>Name</th>
 									<th>Email</th>
-									<th>Nickname</th>
+									<th>Perms</th>
 									<th>Slack ID</th>
 									<th>Hackatime</th>
 									<th>Joined</th>
 								</tr>
 							</thead>
 							<tbody>
-								{#each users as user}
+								{#each filteredUsers as user}
 									<tr
 										class:selected={selectedUser?.id === user.id}
 										onclick={() => selectUser(user)}
 									>
 										<td>{user.name ?? '—'}</td>
 										<td class="mono">{user.email}</td>
-										<td>{user.nickname ?? '—'}</td>
+										<td><span class="badge" class:banned={user.perms === 'Banned'}>{user.perms ?? '—'}</span></td>
 										<td class="mono">{user.slackId ?? '—'}</td>
 										<td>{user.hackatimeConnected ? 'Yes' : 'No'}</td>
 										<td>{formatDate(user.createdAt)}</td>
@@ -150,7 +257,7 @@
 								{/each}
 							</tbody>
 						</table>
-						{#if users.length === 0}
+						{#if filteredUsers.length === 0}
 							<p class="empty">No users found.</p>
 						{/if}
 					{/if}
@@ -253,6 +360,59 @@
 					</div>
 				{/if}
 			</div>
+		{:else if activeTab === 'news'}
+			<div class="news-admin">
+				<div class="news-form">
+					<h3>Add News Item</h3>
+					<div class="news-form-fields">
+						<div class="news-date-row">
+							<input type="date" bind:value={newNewsDate} class="news-input news-input-date" />
+							<button class="btn btn-now" onclick={() => newNewsDate = todayDateStr()}>Now</button>
+						</div>
+						<textarea placeholder="News text..." bind:value={newNewsText} class="news-input news-input-text" rows="2"></textarea>
+						<button class="btn btn-add-news" onclick={createNews} disabled={newsSaving || !newNewsText.trim() || !newNewsDate}>
+							{newsSaving ? 'Saving...' : 'Add'}
+						</button>
+					</div>
+				</div>
+
+				{#if newsLoading}
+					<p class="loading">Loading news...</p>
+				{:else if newsItems.length === 0}
+					<p class="empty">No news items yet.</p>
+				{:else}
+					<table class="users-table">
+						<thead>
+							<tr>
+								<th>Date</th>
+								<th>Text</th>
+								<th>Actions</th>
+							</tr>
+						</thead>
+						<tbody>
+							{#each newsItems as item}
+								<tr>
+									{#if editingNews?.id === item.id}
+										<td><input type="date" bind:value={editingNews.displayDate} class="news-edit-input" /></td>
+										<td><textarea bind:value={editingNews.text} class="news-edit-input news-edit-text" rows="2"></textarea></td>
+										<td class="news-actions">
+											<button class="btn btn-save" onclick={saveNewsEdit} disabled={newsSaving}>Save</button>
+											<button class="btn btn-cancel" onclick={() => editingNews = null}>Cancel</button>
+										</td>
+									{:else}
+										<td>{item.displayDate}</td>
+										<td>{item.text}</td>
+										<td class="news-actions">
+											<button class="btn btn-edit" onclick={() => editingNews = { ...item }}>Edit</button>
+											<button class="btn btn-delete" onclick={() => deleteNews(item.id)} disabled={newsSaving}>Delete</button>
+										</td>
+									{/if}
+								</tr>
+							{/each}
+						</tbody>
+					</table>
+				{/if}
+			</div>
 		{:else if activeTab === 'fulfillment'}
 			<p class="placeholder">Fulfillment — coming soon.</p>
 		{:else if activeTab === 'projects'}
@@ -324,6 +484,44 @@
 		flex: 1;
 		min-width: 0;
 		overflow-x: auto;
+	}
+
+	.users-toolbar {
+		display: flex;
+		gap: 0.5rem;
+		margin-bottom: 0.75rem;
+	}
+
+	.users-search {
+		flex: 1;
+		background: #1a1a1a;
+		border: 1px solid #444;
+		border-radius: 6px;
+		color: #e0e0e0;
+		padding: 0.5rem 0.75rem;
+		font-size: 0.85rem;
+		font-family: inherit;
+	}
+
+	.users-search:focus {
+		outline: none;
+		border-color: #5b9bd5;
+	}
+
+	.users-perms-filter {
+		background: #1a1a1a;
+		border: 1px solid #444;
+		border-radius: 6px;
+		color: #e0e0e0;
+		padding: 0.5rem 0.75rem;
+		font-size: 0.85rem;
+		font-family: inherit;
+		cursor: pointer;
+	}
+
+	.users-perms-filter:focus {
+		outline: none;
+		border-color: #5b9bd5;
 	}
 
 	.users-layout.has-detail .users-table-wrap {
@@ -515,4 +713,118 @@
 		text-align: center;
 		padding: 2rem;
 	}
+
+	/* News admin styles */
+	.news-admin {
+		max-width: 900px;
+	}
+
+	.news-form {
+		background: #222;
+		border: 1px solid #333;
+		border-radius: 8px;
+		padding: 1.25rem;
+		margin-bottom: 1.5rem;
+	}
+
+	.news-form h3 {
+		font-size: 0.8rem;
+		text-transform: uppercase;
+		letter-spacing: 0.05em;
+		color: #888;
+		margin: 0 0 0.75rem 0;
+	}
+
+	.news-form-fields {
+		display: grid;
+		grid-template-columns: auto 1fr auto;
+		gap: 0.5rem;
+		align-items: start;
+	}
+
+	.news-date-row {
+		display: flex;
+		gap: 0.35rem;
+		align-items: center;
+	}
+
+	.btn-now {
+		background: #2a2a2a;
+		color: #ccc;
+		border-color: #444;
+		white-space: nowrap;
+	}
+
+	.btn-now:hover:not(:disabled) { background: #333; }
+
+	.news-input, .news-edit-input {
+		background: #1a1a1a;
+		border: 1px solid #444;
+		border-radius: 4px;
+		color: #e0e0e0;
+		padding: 0.5rem;
+		font-size: 0.85rem;
+		font-family: inherit;
+	}
+
+	.news-input:focus, .news-edit-input:focus {
+		outline: none;
+		border-color: #5b9bd5;
+	}
+
+	.news-input-text {
+		resize: vertical;
+	}
+
+	.news-edit-text {
+		width: 100%;
+		resize: vertical;
+	}
+
+	.news-actions {
+		display: flex;
+		gap: 0.35rem;
+		white-space: nowrap;
+	}
+
+	.btn-add-news {
+		background: #1e3a1e;
+		color: #8bc48b;
+		border-color: #2a5a2a;
+		align-self: start;
+	}
+
+	.btn-add-news:hover:not(:disabled) { background: #255025; }
+
+	.btn-edit {
+		background: #1e2a3a;
+		color: #5b9bd5;
+		border-color: #2a3a5a;
+	}
+
+	.btn-edit:hover:not(:disabled) { background: #253550; }
+
+	.btn-delete {
+		background: #2a1515;
+		color: #e05555;
+		border-color: #4a2020;
+	}
+
+	.btn-delete:hover:not(:disabled) { background: #3a1a1a; }
+
+	.btn-save {
+		background: #1e3a1e;
+		color: #8bc48b;
+		border-color: #2a5a2a;
+	}
+
+	.btn-save:hover:not(:disabled) { background: #255025; }
+
+	.btn-cancel {
+		background: #2a2a2a;
+		color: #888;
+		border-color: #444;
+	}
+
+	.btn-cancel:hover:not(:disabled) { background: #333; }
 </style>

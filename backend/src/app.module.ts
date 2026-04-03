@@ -8,10 +8,12 @@ import { OnboardingModule } from './onboarding/onboarding.module';
 import { ProjectsModule } from './projects/projects.module';
 import { AuditLogModule } from './audit-log/audit-log.module';
 import { AdminModule } from './admin/admin.module';
+import { NewsModule } from './news/news.module';
 import { User } from './entities/user.entity';
 import { Session } from './entities/session.entity';
 import { Project } from './entities/project.entity';
 import { AuditLog } from './entities/audit-log.entity';
+import { NewsItem } from './entities/news-item.entity';
 import { HealthController } from './health.controller';
 
 @Module({
@@ -24,7 +26,7 @@ import { HealthController } from './health.controller';
       useFactory: (config: ConfigService) => ({
         type: 'postgres',
         url: config.getOrThrow('DATABASE_URL'),
-        entities: [User, Session, Project, AuditLog],
+        entities: [User, Session, Project, AuditLog, NewsItem],
         migrations: [__dirname + '/migrations/*{.ts,.js}'],
         migrationsRun: true,
         synchronize: false,
@@ -37,6 +39,7 @@ import { HealthController } from './health.controller';
     ProjectsModule,
     AuditLogModule,
     AdminModule,
+    NewsModule,
   ],
 })
 export class AppModule {}

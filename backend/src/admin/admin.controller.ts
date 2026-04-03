@@ -3,6 +3,7 @@ import {
   Get,
   Post,
   Patch,
+  Delete,
   Param,
   Body,
   Req,
@@ -64,6 +65,35 @@ export class AdminController {
       'admin_perms_change',
       `Changed user ${id} perms to ${body.perms}`,
     );
+    return { success: true };
+  }
+
+  // ── News CRUD ──
+
+  @Get('news')
+  listNews() {
+    return this.adminService.listNews();
+  }
+
+  @Post('news')
+  async createNews(@Body() body: { text?: string; displayDate?: string }) {
+    if (!body.text || !body.displayDate) {
+      throw new BadRequestException('text and displayDate are required');
+    }
+    return this.adminService.createNews(body.text, body.displayDate);
+  }
+
+  @Patch('news/:id')
+  async updateNews(
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body() body: { text?: string; displayDate?: string },
+  ) {
+    return this.adminService.updateNews(id, body);
+  }
+
+  @Delete('news/:id')
+  async deleteNews(@Param('id', ParseUUIDPipe) id: string) {
+    await this.adminService.deleteNews(id);
     return { success: true };
   }
 }

@@ -106,21 +106,32 @@ All endpoints live under the backend at `/api`. Auth-protected routes require a 
 
 | Endpoint | Method | Auth | Purpose |
 |----------|--------|------|---------|
+| `/api/health` | GET | — | Health check |
 | `/api/auth/start` | POST | — | Begin OAuth flow |
 | `/api/auth/handle-callback` | POST | — | Complete OAuth, issue tokens |
 | `/api/auth/refresh` | POST | — | Rotate refresh token |
 | `/api/auth/me` | GET | JWT | Current user claims |
 | `/api/auth/logout` | POST | — | Invalidate session |
+| `/api/auth/rsvp` | POST | JWT | RSVP using authenticated session |
+| `/api/auth/scope` | GET | JWT | Check user permissions |
+| `/api/rsvp` | POST | — | Submit an RSVP |
+| `/api/hackatime/start` | POST | JWT | Begin Hackatime OAuth |
+| `/api/hackatime/callback` | POST | JWT | Complete Hackatime OAuth |
+| `/api/hackatime/projects` | GET | JWT | User's Hackatime project names |
 | `/api/projects` | GET | JWT | List user's projects |
 | `/api/projects` | POST | JWT | Create a project |
 | `/api/projects/:id` | PATCH | JWT | Update a project |
 | `/api/projects/:id` | DELETE | JWT | Delete a project |
 | `/api/projects/hours` | GET | JWT | Hackatime hours breakdown |
-| `/api/hackatime/start` | POST | JWT | Begin Hackatime OAuth |
-| `/api/hackatime/callback` | POST | JWT | Complete Hackatime OAuth |
+| `/api/leaderboard` | GET | JWT | Top 10 users by approved hours |
 | `/api/onboarding/status` | GET | JWT | Onboarding step completion |
-| `/api/rsvp` | POST | — | Submit an RSVP |
-| `/api/health` | GET | — | Health check |
+| `/api/onboarding/two-emails` | POST | JWT | Confirm different Slack email |
+| `/api/onboarding/sticker-link` | GET | JWT | User's unique sticker form link |
+| `/api/audit-log` | GET | JWT | User's audit log entries |
+| `/api/admin/users` | GET | Admin | List all users |
+| `/api/admin/users/:id` | GET | Admin | Get specific user |
+| `/api/admin/users/:id/ban` | POST | Admin | Ban a user |
+| `/api/admin/users/:id/perms` | PATCH | Admin | Update user permissions |
 
 ---
 

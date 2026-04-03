@@ -151,6 +151,58 @@ export class RsvpService {
     return data.records?.[0]?.fields?.Perms ?? null;
   }
 
+  async getAllPerms(): Promise<Map<string, string>> {
+    const permsMap = new Map<string, string>();
+    let offset: string | undefined;
+
+    do {
+      const searchParams = new URLSearchParams();
+      searchParams.append('fields[]', 'Email');
+      searchParams.append('fields[]', 'Perms');
+      searchParams.append('pageSize', '100');
+      if (offset) searchParams.append('offset', offset);
+
+      const res = await fetchWithTimeout(`${this.baseUrl}?${searchParams}`, {
+        headers: { Authorization: `Bearer ${this.airtableApiKey}` },
+      });
+
+      if (!res.ok) break;
+
+      const data = await res.json();
+      for (const record of data.records ?? []) {
+        const email = record.fields?.Email;
+        const perms = record.fields?.Perms;
+        if (email) permsMap.set(email.toLowerCase(), perms ?? 'User');
+      }
+      offset = data.offset;
+    } while (offset);
+
+    return permsMap;
+  }
+
+  async getStickerLink(rawEmail: string): Promise<string | null> {
+    const email = this.sanitizeEmail(rawEmail);
+    const searchParams = new URLSearchParams({
+      filterByFormula: `{Email} = "${this.escapeAirtableValue(email)}"`,
+      maxRecords: '1',
+    });
+    searchParams.append('fields[]', 'Fillout Sticker Link');
+
+    const res = await fetchWithTimeout(`${this.baseUrl}?${searchParams}`, {
+      headers: { Authorization: `Bearer ${this.airtableApiKey}` },
+    });
+
+    if (!res.ok) {
+      throw new HttpException(
+        'Failed to fetch sticker link',
+        HttpStatus.BAD_GATEWAY,
+      );
+    }
+
+    const data = await res.json();
+    return data.records?.[0]?.fields?.['Fillout Sticker Link'] ?? null;
+  }
+
   private async createRecord(email: string): Promise<void> {
     const res = await fetchWithTimeout(this.baseUrl, {
       method: 'POST',

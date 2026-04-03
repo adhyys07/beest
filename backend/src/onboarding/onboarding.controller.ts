@@ -7,6 +7,7 @@ import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import { HackatimeService } from '../hackatime/hackatime.service';
 import { SlackService } from '../slack/slack.service';
 import { ProjectsService } from '../projects/projects.service';
+import { RsvpService } from '../rsvp/rsvp.service';
 import { User } from '../entities/user.entity';
 
 @Controller('api/onboarding')
@@ -17,6 +18,7 @@ export class OnboardingController {
     private readonly hackatimeService: HackatimeService,
     private readonly slackService: SlackService,
     private readonly projectsService: ProjectsService,
+    private readonly rsvpService: RsvpService,
     @InjectRepository(User)
     private readonly userRepo: Repository<User>,
   ) {}
@@ -63,5 +65,23 @@ export class OnboardingController {
       slack,
       project: await this.projectsService.userHasProjects(user.uid),
     };
+  }
+
+  @Throttle({ default: { limit: 10, ttl: 60000 } })
+  @UseGuards(JwtAuthGuard)
+  @Get('sticker-link')
+  async getStickerLink(@Req() req: Request) {
+    const user = (req as any).user;
+    const dbUser = await this.userRepo.findOne({
+      where: { hcaSub: user.sub },
+      select: ['email'],
+    });
+
+    if (!dbUser?.email) {
+      return { link: null };
+    }
+
+    const link = await this.rsvpService.getStickerLink(dbUser.email);
+    return { link };
   }
 }

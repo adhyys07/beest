@@ -43,8 +43,10 @@
   let submitting = $state(false);
   let formError = $state('');
   let auditLog = $state<{ action: string; label: string; createdAt: string }[]>([]);
+  let newsItems = $state<{ id: string; text: string; displayDate: string }[]>([]);
   let leaderboard = $state<{ name: string; hours: number }[]>([]);
   let leaderboardLoading = $state(true);
+  let stickerLink = $state<string | null>(null);
   let totalBuilders = $state(0);
   let totalHours = $state(0);
   let hoursByStatus = $state<Record<string, number>>({});
@@ -217,6 +219,16 @@
       if (res.ok) {
         const data = await res.json();
         auditLog = Array.isArray(data) ? data : [];
+      }
+    } catch { /* silent */ }
+  }
+
+  async function fetchNews() {
+    try {
+      const res = await fetch('/api/news');
+      if (res.ok) {
+        const data = await res.json();
+        newsItems = Array.isArray(data) ? data : [];
       }
     } catch { /* silent */ }
   }
@@ -421,6 +433,16 @@
     activeSection = id;
   }
 
+  async function fetchStickerLink() {
+    try {
+      const res = await fetch('/api/onboarding/sticker-link');
+      if (res.ok) {
+        const data = await res.json();
+        stickerLink = data.link ?? null;
+      }
+    } catch { /* ignore */ }
+  }
+
   onMount(() => {
     let loaded = 0;
     for (const src of ['/images/tile.webp', '/images/tile2.webp', '/images/tile3.webp']) {
@@ -431,8 +453,10 @@
     fetchProjects();
     fetchHackatimeProjects();
     fetchAuditLog();
+    fetchNews();
     fetchProjectHours();
     fetchLeaderboard();
+    fetchStickerLink();
   });
 </script>
 
@@ -471,10 +495,12 @@
             </li>
           {/each}
         </ul>
-        <a href="https://forms.hackclub.com/beest-stickers" target="_blank" rel="noopener" class="sticker-promo">
+        {#if stickerLink}
+        <a href={stickerLink} target="_blank" rel="noopener" class="sticker-promo">
           <img src="/images/sticker.webp" alt="Beest sticker" class="sticker-img" />
           <span class="sticker-text">Get Stickers</span>
         </a>
+        {/if}
         <div class="sidebar-footer">
           <a href="/api/auth/logout" class="logout-link">Log Out</a>
         </div>
@@ -844,10 +870,16 @@
         <div class="news-box">
           <h3 class="news-title">News</h3>
           <div class="news-list">
-            <div class="news-item">
-              <span class="news-date">Apr 3</span>
-              <p class="news-text">Beest is soft launched! You can start making progress toward the event while I iron out the bugs! Thanks for helping me through beta -Euan.</p>
-            </div>
+            {#if newsItems.length === 0}
+              <p class="news-empty">No news yet.</p>
+            {:else}
+              {#each newsItems as item}
+                <div class="news-item">
+                  <span class="news-date">{new Date(item.displayDate + 'T00:00:00').toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}</span>
+                  <p class="news-text">{item.text}</p>
+                </div>
+              {/each}
+            {/if}
           </div>
         </div>
         </div>

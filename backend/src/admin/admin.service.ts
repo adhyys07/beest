@@ -9,6 +9,7 @@ import { User } from '../entities/user.entity';
 import { Session } from '../entities/session.entity';
 import { Project } from '../entities/project.entity';
 import { AuditLog } from '../entities/audit-log.entity';
+import { NewsItem } from '../entities/news-item.entity';
 import { RsvpService } from '../rsvp/rsvp.service';
 
 const VALID_PERMS = [
@@ -27,13 +28,15 @@ export class AdminService {
     @InjectRepository(Session) private readonly sessionRepo: Repository<Session>,
     @InjectRepository(Project) private readonly projectRepo: Repository<Project>,
     @InjectRepository(AuditLog) private readonly auditLogRepo: Repository<AuditLog>,
+    @InjectRepository(NewsItem) private readonly newsRepo: Repository<NewsItem>,
     private readonly rsvpService: RsvpService,
   ) {}
 
   async listUsers(): Promise<any[]> {
-    const users = await this.userRepo.find({
-      order: { createdAt: 'DESC' },
-    });
+    const [users, permsMap] = await Promise.all([
+      this.userRepo.find({ order: { createdAt: 'DESC' } }),
+      this.rsvpService.getAllPerms(),
+    ]);
     return users.map((u) => ({
       id: u.id,
       hcaSub: u.hcaSub,
@@ -42,6 +45,7 @@ export class AdminService {
       slackId: u.slackId,
       email: u.email,
       hackatimeConnected: !!u.hackatimeToken,
+      perms: (u.email ? permsMap.get(u.email.toLowerCase()) : null) ?? null,
       createdAt: u.createdAt,
     }));
   }
@@ -116,5 +120,30 @@ export class AdminService {
     if (!user) throw new NotFoundException('User not found');
 
     await this.rsvpService.updatePerms(user.email, perms);
+  }
+
+  // ── News CRUD ──
+
+  async listNews(): Promise<NewsItem[]> {
+    return this.newsRepo.find({ order: { displayDate: 'DESC', createdAt: 'DESC' } });
+  }
+
+  async createNews(text: string, displayDate: string): Promise<NewsItem> {
+    const item = this.newsRepo.create({ text, displayDate });
+    return this.newsRepo.save(item);
+  }
+
+  async updateNews(id: string, data: { text?: string; displayDate?: string }): Promise<NewsItem> {
+    const item = await this.newsRepo.findOne({ where: { id } });
+    if (!item) throw new NotFoundException('News item not found');
+    if (data.text !== undefined) item.text = data.text;
+    if (data.displayDate !== undefined) item.displayDate = data.displayDate;
+    return this.newsRepo.save(item);
+  }
+
+  async deleteNews(id: string): Promise<void> {
+    const item = await this.newsRepo.findOne({ where: { id } });
+    if (!item) throw new NotFoundException('News item not found');
+    await this.newsRepo.remove(item);
   }
 }
