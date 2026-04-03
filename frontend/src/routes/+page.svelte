@@ -162,6 +162,12 @@
 
 <svelte:window bind:scrollY />
 
+<div class="scroll-hint" class:visible={scrollHintVisible}>
+  <svg width="56" height="56" viewBox="0 0 24 24" fill="none" stroke="#ffffff" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M12 5v14M5 12l7 7 7-7" />
+  </svg>
+</div>
+
 <div class="saturate-wrap" style="--sy:{scrollY}">
 <div class="page-wrap">
 
@@ -188,7 +194,7 @@
   <div class="hero-parallax" bind:clientHeight={heroHeight}>
     {#each [
       { src: '', x: 0, rot: 0, scale: 0, drift: 0, isBg: true },
-      { src: '/images/beest-cropped/2.webp', x: 0, rot: 0.006, scale: 0.0003, drift: 0.02, offsetY: -60 },
+      { src: '/images/beest-cropped/2.webp', x: 0, rot: 0.003, scale: 0.0003, drift: 0.02, offsetY: -60 },
       { src: '/images/beest-cropped/3.webp', x: 0, rot: 0, scale: 0, drift: 0.04, crop: { left: 0, top: 53.5926, width: 100, height: 46.4074 } },
       { src: '/images/beest-cropped/4.webp', x: 0, rot: 0, scale: 0, drift: 0.06, crop: { left: 0, top: 64.6667, width: 44.5625, height: 21.9259 } },
       { src: '/images/beest-cropped/5.webp', x: 0, rot: 0, scale: 0, drift: 0.08, crop: { left: 13.7708, top: 67.2222, width: 86.2292, height: 32.7778 } },
@@ -225,11 +231,7 @@
     <h1 class="hero-title">#BEEST</h1>
     <p class="hero-subtitle">{subtitleText}<span class="cursor">|</span></p>
   </div>
-  <div class="scroll-hint" class:visible={scrollHintVisible}>
-    <svg width="44" height="44" viewBox="0 0 24 24" fill="none" stroke="#e6f4fe" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-      <path d="M12 5v14M5 12l7 7 7-7" />
-    </svg>
-  </div>
+
 </div>
 </div>
 
@@ -529,7 +531,7 @@
       <a href="https://hackclub.com/privacy-and-terms/" target="_blank" rel="noreferrer">Privacy</a>
     </div>
   </div>
-  <p class="footer-love">made with &lt;3 by teens for teens</p>
+  <p class="footer-love">made with <a href="https://hackclub.com/philosophy/" target="_blank" rel="noopener noreferrer">&lt;3</a> by <a href="https://github.com/EDRipper" target="_blank" rel="noopener noreferrer">teens</a> for <a href="https://slack.hackclub.com" target="_blank" rel="noopener noreferrer">teens</a></p>
   <svg class="footer-cog gear-cw" viewBox="0 0 100 100" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
     <g fill="#7f796d"><circle cx="50" cy="50" r="30"/>{#each Array(8) as _, t}<rect x="43" y="4" width="14" height="22" rx="3" transform="rotate({t*45} 50 50)"/>{/each}</g><circle cx="50" cy="50" r="12" fill="#000"/>
   </svg>
@@ -657,10 +659,10 @@
   }
 
   .scroll-hint {
-    position: absolute;
-    bottom: -110px;
-    right: 48px;
-    z-index: 13;
+    position: fixed;
+    bottom: 40px;
+    right: 40px;
+    z-index: 100;
     opacity: 0;
     transition: opacity 0.6s ease;
     animation: bounce-arrow 1.5s ease-in-out infinite;
@@ -764,11 +766,11 @@
     margin: 0;
     padding: 0;
     background-color: #47453f;
-    filter: saturate(1.5);
   }
 
   .saturate-wrap {
     --sy: 0;
+    filter: saturate(1.5);
   }
 
   .what-is-this,
@@ -1608,6 +1610,13 @@
     font-size: 18px;
     color: #7f796d;
     text-align: left;
+  }
+
+  .footer-love a,
+  .footer-love a:visited,
+  .footer-love a:hover,
+  .footer-love a:active {
+    color: #93b4cd;
   }
 
   .footer-cog {
