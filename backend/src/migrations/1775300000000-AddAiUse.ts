@@ -4,7 +4,7 @@ export class AddAiUse1775300000000 implements MigrationInterface {
     name = 'AddAiUse1775300000000'
 
     public async up(queryRunner: QueryRunner): Promise<void> {
-        await queryRunner.query(`ALTER TABLE "projects" ADD "ai_use" varchar(1000)`);
+        await queryRunner.query(`ALTER TABLE "projects" ADD COLUMN IF NOT EXISTS "ai_use" varchar(1000)`);
     }
 
     public async down(queryRunner: QueryRunner): Promise<void> {
