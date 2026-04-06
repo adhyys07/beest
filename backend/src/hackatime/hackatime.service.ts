@@ -153,8 +153,10 @@ export class HackatimeService implements OnModuleInit {
       );
       if (meRes.ok) {
         const meData = await meRes.json();
-        hackatimeUid = meData?.id?.toString() ?? meData?.user_id?.toString() ?? null;
-        if (meData?.trust_factor?.trust_level === 'red') {
+        const d = meData?.data ?? meData;
+        hackatimeUid = d?.id?.toString() ?? d?.user_id?.toString() ?? null;
+        const trustData = d?.trust_factor ?? meData?.trust_factor;
+        if (trustData?.trust_level === 'red') {
           this.logger.warn(`Hackatime-banned user attempted connection: ${userId}`);
           const user = await this.userRepo.findOne({ where: { hcaSub: userId } });
           if (user?.email) {
@@ -328,7 +330,8 @@ export class HackatimeService implements OnModuleInit {
           this.logger.warn(`Backfill: /me failed (${res.status}) for user ${user.hcaSub}`);
           continue;
         }
-        const data = await res.json();
+        const raw = await res.json();
+        const data = raw?.data ?? raw;
         const htId = data?.id?.toString() ?? data?.user_id?.toString() ?? null;
         if (htId) {
           user.hackatimeUserId = htId;

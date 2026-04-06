@@ -482,18 +482,42 @@ export class AdminService {
     }
 
     try {
-      // 1. Resolve Hackatime user ID — prefer stored ID, fall back to email lookup
+      // 1. Resolve Hackatime user ID — prefer stored ID, fall back to email lookup, then OAuth token
       let hackatimeUserId: string | number | null = user.hackatimeUserId ?? null;
       if (!hackatimeUserId && user.email) {
-        const emailRes = await this.hackatimePost(
-          '/api/admin/v1/user/get_user_by_email',
-          { email: user.email },
-        );
-        if (!emailRes.ok) {
-          return { projectId, hackatimeProjects: [], totalHours: 0, previousApprovedHours: 0, trustLevel: null, unifiedDuplicate: false, unifiedError: true };
+        try {
+          const emailRes = await this.hackatimePost(
+            '/api/admin/v1/user/get_user_by_email',
+            { email: user.email },
+          );
+          if (emailRes.ok) {
+            const emailData = await emailRes.json();
+            hackatimeUserId = emailData.user_id ?? emailData?.data?.user_id ?? null;
+          }
+        } catch (err) {
+          this.logger.warn(`Hackatime email lookup failed for project ${projectId}: ${err}`);
         }
-        const emailData = await emailRes.json();
-        hackatimeUserId = emailData.user_id;
+      }
+      // Last resort: use the user's own Hackatime OAuth token to resolve their ID
+      if (!hackatimeUserId && user.hackatimeToken) {
+        try {
+          const meRes = await fetchWithTimeout(
+            `${this.hackatimeBaseUrl}/api/v1/authenticated/me`,
+            { headers: { Authorization: `Bearer ${user.hackatimeToken}` } },
+          );
+          if (meRes.ok) {
+            const meData = await meRes.json();
+            const d = meData?.data ?? meData;
+            hackatimeUserId = d?.id?.toString() ?? d?.user_id?.toString() ?? null;
+            // Persist for future lookups
+            if (hackatimeUserId) {
+              user.hackatimeUserId = String(hackatimeUserId);
+              await this.userRepo.save(user);
+            }
+          }
+        } catch (err) {
+          this.logger.warn(`Hackatime OAuth /me fallback failed for project ${projectId}: ${err}`);
+        }
       }
       if (!hackatimeUserId) {
         return { projectId, hackatimeProjects: [], totalHours: 0, previousApprovedHours: 0, trustLevel: null, unifiedDuplicate: false, unifiedError: true };
@@ -509,7 +533,7 @@ export class AdminService {
       let trustLevel: string | null = null;
       if (infoRes.ok) {
         const infoData = await infoRes.json();
-        trustLevel = infoData?.user?.trust_level ?? null;
+        trustLevel = infoData?.user?.trust_level ?? infoData?.data?.trust_level ?? infoData?.trust_level ?? null;
       }
 
       let matched: { name: string; hours: number; languages: string[] }[] = [];
@@ -519,7 +543,7 @@ export class AdminService {
           name: string;
           total_duration: number;
           languages: string[];
-        }[] = projData?.projects ?? [];
+        }[] = projData?.projects ?? projData?.data ?? [];
 
         if (hackatimeNames.length > 0) {
           const nameSet = new Set(hackatimeNames);
@@ -527,7 +551,7 @@ export class AdminService {
             .filter((p) => nameSet.has(p.name))
             .map((p) => ({
               name: p.name,
-              hours: Math.round((p.total_duration / 3600) * 10) / 10,
+              hours: Math.round(((p.total_duration ?? (p as any).total_seconds ?? 0) / 3600) * 10) / 10,
               languages: p.languages ?? [],
             }));
         }
