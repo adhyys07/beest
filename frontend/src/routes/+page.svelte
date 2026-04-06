@@ -26,8 +26,8 @@
   const rawProgress = $derived(Math.min(scrollY / PARALLAX_TRAVEL, 1));
   const easedProgress = $derived(rawProgress * (2 - rawProgress));
 
-  // Time-based hero animation: waiting → animating → scrolling → done
-  let animPhase = $state<'waiting' | 'animating' | 'scrolling' | 'done'>('waiting');
+  // Time-based hero animation: waiting → animating → done
+  let animPhase = $state<'waiting' | 'animating' | 'done'>('waiting');
   let animValue = $state(0); // 0→1 during animation
 
   const pxRemaining = $derived(
@@ -35,8 +35,6 @@
       ? PARALLAX_TRAVEL * (1 - easedProgress)
       : animPhase === 'animating'
       ? PARALLAX_TRAVEL * (1 - animValue * (2 - animValue))
-      : animPhase === 'scrolling'
-      ? 0
       : PARALLAX_TRAVEL
   );
   const postScroll = $derived(
@@ -50,7 +48,7 @@
   let freeEl: HTMLElement;
   let diagramEl: HTMLElement;
   let diagramTop = $state(0);
-  let stickerCtaEl: HTMLElement;
+
 
   onMount(() => {
     const observer = new IntersectionObserver(([e]) => {
@@ -86,8 +84,7 @@
         if (animValue < 1) {
           animRaf = requestAnimationFrame(tick);
         } else {
-          animPhase = 'scrolling';
-          stickerCtaEl.scrollIntoView({ behavior: 'smooth' });
+          animPhase = 'done';
         }
       };
       animRaf = requestAnimationFrame(tick);
@@ -102,15 +99,6 @@
     };
   });
 
-  // Once auto-scroll reaches the target, switch to normal scroll-driven mode
-  $effect(() => {
-    if (animPhase === 'scrolling' && stickerCtaEl) {
-      const rect = stickerCtaEl.getBoundingClientRect();
-      if (rect.top <= 10) {
-        animPhase = 'done';
-      }
-    }
-  });
 
   // 0 -> 1 as the diagram scrolls through the viewport
   const vh = $derived(typeof window !== 'undefined' ? window.innerHeight : 800);
@@ -308,7 +296,7 @@
 </div>
 </div>
 
-<section class="sticker-cta" bind:this={stickerCtaEl}>
+<section class="sticker-cta">
   <div class="cta-group">
     <div class="cta-sticker">
       <img src="/images/sticker.webp" alt="Beest sticker" loading="lazy" decoding="async" />
@@ -392,9 +380,8 @@
     A Beest (Strandbeest) is a sail powered mechanical animal constructed of just fabric, plastic pipes,
     zip ties and recycled plastic bottles. I think they are the coolest thing ever, and if you agree,
     you can join me in building one! Everything (including flights, food and accommodation) is totally
-    free for teenagers who qualify by building a project. From [Date] to [Date] you and [X] teens will
-    fly to the Netherlands to build a StrandBeest, present it to the creator of strandbeests and watch
-    him exhibit the full collection!
+    free for teenagers who qualify by building a project. In July, you and 30 teens will
+    fly to the Netherlands to build beach walking mechanisms and watch the strandbeest exhibit!
   </p>
 </section>
 
@@ -450,7 +437,7 @@
     <h2>Am I Eligible?</h2>
     <p>
       If you are a teen, yes! The only criteria is being a teenager and building a real open-source
-      software/hardware project for Y hours. We can help you get a visa, cover the cost of your flight
+      software/hardware project for 40 hours. We can help you get a visa, cover the cost of your flight
       or hop on a call with parents! If you aren't sure, join the slack and ask - and if you can't make
       it, stay for the community! Hack Club is much bigger than Beest, we run events like this every
       few weeks!
