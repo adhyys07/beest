@@ -833,7 +833,7 @@
       <p class="mobile-warning-text">
         <strong>#BEEST</strong> is built for desktop. For the best experience, please visit on a computer.
       </p>
-      <button class="mobile-warning-dismiss" onclick={() => mobileWarningDismissed = true}>Continue anyway</button>
+      <button class="mobile-warning-dismiss" onclick={() => { window.location.href = '/tutorial'; }}>Continue anyway</button>
     </div>
   </div>
   {/if}
