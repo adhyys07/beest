@@ -1,6 +1,4 @@
 <script lang="ts">
-	import favicon from '$lib/assets/favicon.svg';
-
 	let { children } = $props();
 
 	let impersonating = $state(false);
@@ -26,7 +24,6 @@
 
 <svelte:head>
 	<title>Beest</title>
-	<link rel="icon" href={favicon} />
 </svelte:head>
 
 {#if impersonating}

@@ -819,7 +819,7 @@
   });
 </script>
 
-<div class="home" class:tile-loaded={tileLoaded}>
+<div class="home" class:tile-loaded={tileLoaded} class:mobile-warning-active={!mobileWarningDismissed}>
 
   <!-- Mobile warning -->
   {#if !mobileWarningDismissed}
@@ -833,7 +833,7 @@
       <p class="mobile-warning-text">
         <strong>#BEEST</strong> is built for desktop. For the best experience, please visit on a computer.
       </p>
-      <button class="mobile-warning-dismiss" onclick={() => { window.location.href = '/tutorial'; }}>Continue anyway</button>
+      <button class="mobile-warning-dismiss" onclick={() => mobileWarningDismissed = true}>Continue anyway</button>
     </div>
   </div>
   {/if}
@@ -5523,8 +5523,8 @@
       display: flex;
     }
 
-    .sidebar,
-    .main {
+    .mobile-warning-active .sidebar,
+    .mobile-warning-active .main {
       display: none;
     }
   }
