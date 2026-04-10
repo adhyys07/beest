@@ -260,6 +260,9 @@
 		return result;
 	});
 
+	const totalUsers = $derived(users.length);
+	const totalHackatime = $derived(users.filter(u => u.hackatimeConnected).length);
+
 	let filteredUsers = $derived.by(() => {
 		let result = users;
 		if (permsFilter) {
@@ -698,6 +701,16 @@
 		{#if activeTab === 'users'}
 			<div class="users-layout" class:has-detail={selectedUser}>
 				<div class="users-table-wrap">
+					<div class="stat-cards">
+						<div class="stat-card">
+							<span class="stat-value">{totalUsers}</span>
+							<span class="stat-label">Total Users</span>
+						</div>
+						<div class="stat-card">
+							<span class="stat-value">{totalHackatime}</span>
+							<span class="stat-label">Hackatime Linked</span>
+						</div>
+					</div>
 					<div class="users-toolbar">
 						<input type="text" placeholder="Search by name, email or Slack ID..." bind:value={userSearch} class="users-search" />
 						<select bind:value={permsFilter} class="users-perms-filter">
@@ -1439,6 +1452,35 @@
 		flex: 1;
 		min-width: 0;
 		overflow-x: auto;
+	}
+
+	.stat-cards {
+		display: flex;
+		gap: 0.75rem;
+		margin-bottom: 1rem;
+	}
+
+	.stat-card {
+		display: flex;
+		flex-direction: column;
+		padding: 1rem 1.5rem;
+		background: #1e1e1e;
+		border: 2px solid #444;
+		border-radius: 8px;
+		min-width: 140px;
+	}
+
+	.stat-value {
+		font-size: 1.75rem;
+		font-weight: 700;
+		color: #e0e0e0;
+		line-height: 1;
+	}
+
+	.stat-label {
+		font-size: 0.8rem;
+		color: #888;
+		margin-top: 0.25rem;
 	}
 
 	.users-toolbar {
