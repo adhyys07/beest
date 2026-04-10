@@ -76,8 +76,12 @@ export class AdminController {
     const adminUid = admin?.uid as string;
     const adminName = admin?.name as string ?? 'Admin';
 
+    // Look up target user's nickname for a friendlier log
+    const targetUser = await this.adminService.getUser(id);
+    const targetNick = targetUser.nickname || targetUser.name || id;
+
     // Log impersonation on both accounts
-    await this.auditLogService.log(adminUid, 'admin_impersonate', `Started impersonating user ${id}`);
+    await this.auditLogService.log(adminUid, 'admin_impersonate', `Started impersonating ${targetNick}`);
     await this.auditLogService.log(id, 'admin_impersonate', `Admin ${adminName} started impersonating this account`);
 
     return this.authService.issueImpersonationToken(id, adminUid, adminName);
