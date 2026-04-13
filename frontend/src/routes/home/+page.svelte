@@ -1882,10 +1882,10 @@
                 <h3 class="settings-link-title">Get Help</h3>
                 <p class="settings-link-desc">Ask questions in #beest-help on Slack.</p>
               </a>
-              <a href="https://security.hackclub.com/" target="_blank" rel="noopener" class="settings-link">
+              <div class="settings-link">
                 <h3 class="settings-link-title">Bug Bounty</h3>
-                <p class="settings-link-desc">Report a bug, earn a bounty.</p>
-              </a>
+                <p class="settings-link-desc">Beest is participating in a security bounty. You can submit proven vulnerabilities for reward <a href="https://security.hackclub.com/" target="_blank" rel="noopener">here</a>.</p>
+              </div>
               <a href="/api/auth/logout" class="settings-link settings-link-logout">
                 <h3 class="settings-link-title">Log Out</h3>
                 <p class="settings-link-desc">Sign out of your account.</p>
