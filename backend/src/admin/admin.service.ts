@@ -478,7 +478,7 @@ export class AdminService {
     const hackatimeNames: string[] = project.hackatimeProjectName ?? [];
     const user = project.user;
     if (!user) {
-      return { projectId, hackatimeProjects: [], totalHours: 0, previousApprovedHours: 0, trustLevel: null, unifiedDuplicate: false, unifiedError: true };
+      return { projectId, hackatimeProjects: [], totalHours: 0, earliestHeartbeat: null, previousApprovedHours: 0, trustLevel: null, unifiedDuplicate: false, unifiedError: true };
     }
 
     try {
@@ -520,7 +520,7 @@ export class AdminService {
         }
       }
       if (!hackatimeUserId) {
-        return { projectId, hackatimeProjects: [], totalHours: 0, previousApprovedHours: 0, trustLevel: null, unifiedDuplicate: false, unifiedError: true };
+        return { projectId, hackatimeProjects: [], totalHours: 0, earliestHeartbeat: null, previousApprovedHours: 0, trustLevel: null, unifiedDuplicate: false, unifiedError: true };
       }
 
       // 2. Get user info (trust level), projects, and Unified duplicate check in parallel
@@ -530,36 +530,64 @@ export class AdminService {
         this.checkUnifiedDuplicate(project.codeUrl ?? ''),
       ]);
 
+      const debug: { infoStatus: number; projectsStatus: number; totalProjectsReturned: number; linkedNames: string[]; availableNames: string[] } = {
+        infoStatus: infoRes.status,
+        projectsStatus: projectsRes.status,
+        totalProjectsReturned: 0,
+        linkedNames: hackatimeNames,
+        availableNames: [],
+      };
+
       let trustLevel: string | null = null;
       if (infoRes.ok) {
         const infoData = await infoRes.json();
         trustLevel = infoData?.user?.trust_level ?? infoData?.data?.trust_level ?? infoData?.trust_level ?? null;
       }
 
-      let matched: { name: string; hours: number; languages: string[] }[] = [];
+      let matched: { name: string; hours: number; languages: string[]; firstHeartbeat: number | null }[] = [];
       if (projectsRes.ok) {
         const projData = await projectsRes.json();
         const allProjects: {
           name: string;
           total_duration: number;
           languages: string[];
+          first_heartbeat?: number | string | null;
         }[] = projData?.projects ?? projData?.data ?? [];
+
+        debug.totalProjectsReturned = allProjects.length;
+        debug.availableNames = allProjects.map((p) => p.name);
 
         if (hackatimeNames.length > 0) {
           const nameSet = new Set(hackatimeNames);
           matched = allProjects
             .filter((p) => nameSet.has(p.name))
-            .map((p) => ({
-              name: p.name,
-              hours: Math.round(((p.total_duration ?? (p as any).total_seconds ?? 0) / 3600) * 10) / 10,
-              languages: p.languages ?? [],
-            }));
+            .map((p) => {
+              const fhRaw = p.first_heartbeat ?? null;
+              let firstHeartbeat: number | null = null;
+              if (fhRaw !== null && fhRaw !== undefined) {
+                const n = typeof fhRaw === 'string' ? Number(fhRaw) : fhRaw;
+                if (Number.isFinite(n) && n > 0) {
+                  firstHeartbeat = n > 1e12 ? Math.floor(n / 1000) : Math.floor(n);
+                }
+              }
+              return {
+                name: p.name,
+                hours: Math.round(((p.total_duration ?? (p as any).total_seconds ?? 0) / 3600) * 10) / 10,
+                languages: p.languages ?? [],
+                firstHeartbeat,
+              };
+            });
         }
       }
 
       const totalHours = Math.round(
         matched.reduce((sum, p) => sum + p.hours, 0) * 10,
       ) / 10;
+
+      const heartbeatTimes = matched
+        .map((p) => p.firstHeartbeat)
+        .filter((t): t is number => t !== null);
+      const earliestHeartbeat = heartbeatTimes.length > 0 ? Math.min(...heartbeatTimes) : null;
 
       // Calculate previous approved hours for delta display on resubmissions
       const lastApprovedSub = await this.submissionRepo.findOne({
@@ -569,10 +597,10 @@ export class AdminService {
       });
       const previousApprovedHours = lastApprovedSub?.overrideHours ?? 0;
 
-      return { projectId, hackatimeProjects: matched, totalHours, previousApprovedHours, trustLevel, unifiedDuplicate: unifiedResult.duplicate, unifiedError: unifiedResult.error };
+      return { projectId, hackatimeProjects: matched, totalHours, earliestHeartbeat, previousApprovedHours, trustLevel, unifiedDuplicate: unifiedResult.duplicate, unifiedError: unifiedResult.error, debug };
     } catch (err) {
       this.logger.error(`Hackatime admin lookup error for project ${projectId}: ${err}`);
-      return { projectId, hackatimeProjects: [], totalHours: 0, previousApprovedHours: 0, trustLevel: null, unifiedDuplicate: false, unifiedError: true };
+      return { projectId, hackatimeProjects: [], totalHours: 0, earliestHeartbeat: null, previousApprovedHours: 0, trustLevel: null, unifiedDuplicate: false, unifiedError: true };
     }
   }
 

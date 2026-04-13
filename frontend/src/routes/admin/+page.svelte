@@ -90,9 +90,10 @@
 	// Hackatime detail expansion
 	interface HackatimeDetail {
 		totalHours: number;
+		earliestHeartbeat: number | null;
 		previousApprovedHours: number;
 		trustLevel: string | null;
-		hackatimeProjects: { name: string; hours: number; languages: string[] }[];
+		hackatimeProjects: { name: string; hours: number; languages: string[]; firstHeartbeat: number | null }[];
 		unifiedDuplicate: boolean;
 		unifiedError: boolean;
 	}
@@ -184,6 +185,20 @@
 		buildJustification(rounded, `adjusted`);
 	}
 
+	function buildInitialJustification(proj: ProjectSummary) {
+		const trustLabels: Record<string, string> = { blue: 'standard', yellow: 'warned', red: 'banned' };
+		const trustLabel = trustLabels[hackatimeData?.trustLevel?.toLowerCase() ?? ''] ?? hackatimeData?.trustLevel ?? 'unknown';
+		const updateNote = proj.isUpdate ? ' (this is an update to an existing project)' : '';
+		const unifiedNote = !hackatimeData?.unifiedDuplicate && !hackatimeData?.unifiedError && proj.codeUrl
+			? `\nAs of ${new Date().toLocaleDateString('en-US', { year: 'numeric', month: 'short', day: 'numeric' })} this is the first submission of this code URL to unified.`
+			: '';
+		const htNames = (hackatimeData?.hackatimeProjects ?? []).map(p => p.name).join(', ');
+		const htNamesNote = htNames ? `\nHackatime projects: ${htNames}` : '';
+		const prevHours = hackatimeData?.previousApprovedHours ?? 0;
+		const deltaNote = prevHours > 0 ? `\nPreviously approved: ${prevHours}h — delta: ${Math.round((customHours - prevHours) * 10) / 10}h` : '';
+		overrideJustification = `the user has trust level ${trustLabel} and tracked ${hackatimeData?.totalHours ?? 0} hours on the project through hackatime${updateNote}${htNamesNote}${deltaNote}${unifiedNote}\n\nsigned off by ${data.user.name ?? 'unknown'}`;
+	}
+
 	async function selectProject(projectId: string) {
 		if (expandedProjectId === projectId) {
 			expandedProjectId = null;
@@ -208,26 +223,16 @@
 				const res = await fetch(`/api/admin/projects/${projectId}/hackatime`);
 				if (res.ok) {
 					hackatimeData = await res.json();
-					customHours = hackatimeData?.totalHours ?? 0;
-					userFacingHours = hackatimeData?.totalHours ?? 0;
-					const trustLabels: Record<string, string> = { blue: 'standard', yellow: 'warned', red: 'banned' };
-					const trustLabel = trustLabels[hackatimeData?.trustLevel?.toLowerCase() ?? ''] ?? hackatimeData?.trustLevel ?? 'unknown';
-					const updateNote = proj.isUpdate ? ' (this is an update to an existing project)' : '';
-					const unifiedNote = !hackatimeData?.unifiedDuplicate && !hackatimeData?.unifiedError && proj.codeUrl
-						? `\nAs of ${new Date().toLocaleDateString('en-US', { year: 'numeric', month: 'short', day: 'numeric' })} this is the first submission of this code URL to unified.`
-						: '';
-					const htNames = (hackatimeData?.hackatimeProjects ?? []).map(p => p.name).join(', ');
-					const htNamesNote = htNames ? `\nHackatime projects: ${htNames}` : '';
-					const prevHours = hackatimeData?.previousApprovedHours ?? 0;
-					const deltaNote = prevHours > 0 ? `\nPreviously approved: ${prevHours}h — delta: ${Math.round((customHours - prevHours) * 10) / 10}h` : '';
-					overrideJustification = `the user has trust level ${trustLabel} and tracked ${hackatimeData?.totalHours ?? 0} hours on the project through hackatime${updateNote}${htNamesNote}${deltaNote}${unifiedNote}\n\nsigned off by ${data.user.name ?? 'unknown'}`;
 				} else {
-					hackatimeData = { totalHours: 0, previousApprovedHours: 0, hackatimeProjects: [], trustLevel: null, unifiedDuplicate: false, unifiedError: false };
+					hackatimeData = { totalHours: 0, earliestHeartbeat: null, previousApprovedHours: 0, hackatimeProjects: [], trustLevel: null, unifiedDuplicate: false, unifiedError: true };
 				}
 			} catch {
-				hackatimeData = { totalHours: 0, previousApprovedHours: 0, hackatimeProjects: [], trustLevel: null, unifiedDuplicate: false, unifiedError: false };
+				hackatimeData = { totalHours: 0, earliestHeartbeat: null, previousApprovedHours: 0, hackatimeProjects: [], trustLevel: null, unifiedDuplicate: false, unifiedError: true };
 			} finally {
 				hackatimeLoading = false;
+				customHours = hackatimeData?.totalHours ?? 0;
+				userFacingHours = hackatimeData?.totalHours ?? 0;
+				buildInitialJustification(proj);
 			}
 		}
 	}
@@ -1155,7 +1160,12 @@
 										class:active={expandedProjectId === project.id}
 										onclick={() => selectProject(project.id)}
 									>
-										<span class="proj-sidebar-name">{project.name}</span>
+										<span class="proj-sidebar-name">
+											{project.name}
+											{#if project.hackatimeProjectName?.length > 0}
+												<span class="ht-pill" title="Hackatime linked: {project.hackatimeProjectName.join(', ')}">HT</span>
+											{/if}
+										</span>
 										<span class="proj-sidebar-meta">
 											{project.user.name ?? '—'}
 											<span class="badge badge-{project.status} badge-sm">{project.status}</span>
@@ -1265,6 +1275,9 @@
 											<div class="ht-header">
 												<span class="ht-trust">Trust Level: <strong class="trust-{hackatimeData.trustLevel ?? 'unknown'}">{{ blue: 'standard', yellow: 'warned', red: 'banned' }[hackatimeData.trustLevel?.toLowerCase() ?? ''] ?? hackatimeData.trustLevel ?? 'unknown'}</strong></span>
 												<span class="ht-total">{hackatimeData.totalHours}h total</span>
+												{#if hackatimeData.earliestHeartbeat}
+													<span class="ht-earliest">first heartbeat: {new Date(hackatimeData.earliestHeartbeat * 1000).toLocaleDateString('en-US', { year: 'numeric', month: 'short', day: 'numeric' })}</span>
+												{/if}
 												{#if hackatimeData.previousApprovedHours > 0}
 													<span class="ht-delta">prev: {hackatimeData.previousApprovedHours}h — delta: {Math.round((hackatimeData.totalHours - hackatimeData.previousApprovedHours) * 10) / 10}h</span>
 												{/if}
@@ -1983,6 +1996,25 @@
 		padding: 0.1rem 0.35rem;
 	}
 
+	.ht-pill {
+		display: inline-block;
+		margin-left: 0.35rem;
+		font-size: 0.6rem;
+		font-weight: 700;
+		padding: 0.05rem 0.3rem;
+		border-radius: 3px;
+		background: rgba(91, 155, 213, 0.2);
+		color: #5b9bd5;
+		border: 1px solid rgba(91, 155, 213, 0.5);
+		vertical-align: middle;
+	}
+
+	.admin-shell.light .ht-pill {
+		background: rgba(42, 102, 153, 0.12);
+		color: #2a6699;
+		border-color: rgba(42, 102, 153, 0.4);
+	}
+
 	.proj-main {
 		flex: 1;
 		background: #252525;
@@ -2455,6 +2487,12 @@
 
 	.ht-delta {
 		color: #c48382;
+		font-weight: 600;
+		font-size: 0.85rem;
+	}
+
+	.ht-earliest {
+		color: #b8a970;
 		font-weight: 600;
 		font-size: 0.85rem;
 	}
