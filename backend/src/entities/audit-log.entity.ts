@@ -14,6 +14,7 @@ export const AUDIT_ACTIONS = [
   'project_submitted',
   'project_deleted',
   'hackatime_connected',
+  'hackatime_ownership_failed',
   'rsvp_submitted',
   'admin_ban',
   'admin_perms_change',

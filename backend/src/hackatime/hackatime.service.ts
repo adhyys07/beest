@@ -1,4 +1,4 @@
-import { Injectable, Logger, OnModuleInit } from '@nestjs/common';
+import { ForbiddenException, Injectable, Logger, OnModuleInit } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
@@ -18,6 +18,7 @@ export class HackatimeService implements OnModuleInit {
   private readonly redirectUri: string;
   private readonly jwtSecret: string;
   private readonly baseUrl: string;
+  private readonly adminApiKey: string | undefined;
   private readonly configured: boolean;
 
   constructor(
@@ -40,6 +41,8 @@ export class HackatimeService implements OnModuleInit {
       'HACKATIME_BASE_URL',
       'https://hackatime.hackclub.com',
     );
+    const rawAdminKey = this.configService.get<string>('HACKATIME_ADMIN_API_KEY');
+    this.adminApiKey = rawAdminKey?.trim() || undefined;
     this.configured = !!(this.clientId && this.clientSecret);
     if (!this.configured) {
       this.logger.warn('HACKATIME_CLIENT_ID/SECRET not set — Hackatime OAuth disabled');
@@ -194,6 +197,148 @@ export class HackatimeService implements OnModuleInit {
       select: ['hackatimeToken'],
     });
     return !!user?.hackatimeToken;
+  }
+
+  /**
+   * Verifies the user's stored `hackatime_user_id` actually belongs to the
+   * Beest account's registered email. Catches the ban-evasion pattern where a
+   * user completes the Hackatime OAuth flow while signed into somebody else's
+   * Hackatime account (shared token, alt account, etc.) so the linked
+   * heartbeats belong to a foreign — and often later-banned — Hackatime user.
+   *
+   * Also re-checks the stored account's current trust/ban state, since the
+   * connect-time check in handleCallback() is only a single snapshot.
+   *
+   * Throws ForbiddenException on any mismatch, and marks the Beest user as
+   * Banned in Airtable + revokes their sessions so the same pattern can't be
+   * retried without reconnecting.
+   *
+   * No-ops silently if the admin API key isn't configured (e.g. local dev).
+   */
+  async verifyAccountOwnership(hcaSub: string): Promise<void> {
+    if (!this.adminApiKey) {
+      this.logger.warn(
+        `Hackatime admin key not set — skipping ownership check for ${hcaSub}`,
+      );
+      return;
+    }
+
+    const user = await this.userRepo.findOne({ where: { hcaSub } });
+    if (!user) throw new ForbiddenException('User not found');
+    if (!user.email) {
+      throw new ForbiddenException('User has no email on file');
+    }
+    if (!user.hackatimeUserId) {
+      throw new ForbiddenException(
+        'Hackatime account not linked — please reconnect Hackatime before submitting a project.',
+      );
+    }
+
+    const storedId = String(user.hackatimeUserId);
+
+    // 1. Resolve the Hackatime user ID that currently owns the Beest email.
+    let emailOwnerId: string | null = null;
+    try {
+      const res = await fetchWithTimeout(
+        `${this.baseUrl}/api/admin/v1/user/get_user_by_email`,
+        {
+          method: 'POST',
+          headers: {
+            Authorization: `Bearer ${this.adminApiKey}`,
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({ email: user.email }),
+        },
+      );
+      if (res.ok) {
+        const body = await res.json().catch(() => null);
+        const rawId = body?.user_id ?? body?.data?.user_id ?? null;
+        if (rawId !== null && rawId !== undefined) {
+          emailOwnerId = String(rawId);
+        }
+      } else if (res.status !== 404) {
+        this.logger.warn(
+          `Hackatime ownership check: get_user_by_email returned ${res.status} for ${hcaSub} — failing open`,
+        );
+        return;
+      }
+    } catch (err) {
+      this.logger.warn(
+        `Hackatime ownership check network error for ${hcaSub}: ${err} — failing open`,
+      );
+      return;
+    }
+
+    // 2. Pull info on the stored ID so we can also re-check trust/ban state.
+    let linkedTrustLevel: string | null = null;
+    let linkedBanned = false;
+    let linkedEmails: string[] = [];
+    try {
+      const res = await fetchWithTimeout(
+        `${this.baseUrl}/api/admin/v1/user/info?user_id=${encodeURIComponent(storedId)}`,
+        { headers: { Authorization: `Bearer ${this.adminApiKey}` } },
+      );
+      if (res.ok) {
+        const body = await res.json().catch(() => null);
+        const u = body?.user ?? body?.data ?? body ?? {};
+        linkedTrustLevel =
+          u?.trust_level ?? u?.trust_factor?.trust_level ?? null;
+        linkedBanned = u?.banned === true;
+        const rawEmails = u?.email_addresses ?? u?.emails ?? [];
+        if (Array.isArray(rawEmails)) {
+          linkedEmails = rawEmails
+            .filter((e): e is string => typeof e === 'string')
+            .map((e) => e.toLowerCase());
+        }
+      }
+    } catch (err) {
+      this.logger.warn(
+        `Hackatime ownership check: /user/info error for ${hcaSub}: ${err}`,
+      );
+    }
+
+    const ownEmail = user.email.toLowerCase();
+    const idsMatch = emailOwnerId !== null && emailOwnerId === storedId;
+    const emailOnLinkedAccount =
+      linkedEmails.length === 0 || linkedEmails.includes(ownEmail);
+    const trustBad = linkedTrustLevel === 'red' || linkedBanned;
+
+    if (!idsMatch || !emailOnLinkedAccount || trustBad) {
+      this.logger.warn(
+        `Hackatime ownership check FAILED for ${hcaSub}: storedId=${storedId} emailOwnerId=${emailOwnerId} linkedTrust=${linkedTrustLevel} linkedBanned=${linkedBanned} emailOnLinked=${emailOnLinkedAccount}`,
+      );
+
+      const reason = !idsMatch
+        ? `Hackatime ID mismatch (stored=${storedId}, expected=${emailOwnerId ?? 'none'})`
+        : !emailOnLinkedAccount
+          ? `Linked Hackatime account does not contain your email`
+          : `Linked Hackatime account is banned (trust=${linkedTrustLevel}, banned=${linkedBanned})`;
+
+      await this.auditLogService.log(
+        user.id,
+        'hackatime_ownership_failed',
+        reason,
+      );
+
+      // Hard-ban: flip Airtable perms to Banned and nuke sessions, matching
+      // the handleCallback red-trust flow.
+      try {
+        await this.rsvpService.updatePerms(user.email, 'Banned');
+      } catch (err) {
+        this.logger.error(
+          `Failed to flip perms to Banned for ${hcaSub}: ${err}`,
+        );
+      }
+      try {
+        await this.sessionRepo.delete({ userId: user.id });
+      } catch (err) {
+        this.logger.error(`Failed to revoke sessions for ${hcaSub}: ${err}`);
+      }
+
+      throw new ForbiddenException(
+        'Your linked Hackatime account does not match your Beest account. Please reconnect Hackatime with the correct account.',
+      );
+    }
   }
 
   /**

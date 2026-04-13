@@ -80,6 +80,9 @@ export class ProjectsService {
     // --- optional hackatime project names (validated against real projects) ---
     const hackatimeProjectName: string[] = [];
     if (dto.hackatimeProjectName && Array.isArray(dto.hackatimeProjectName) && dto.hackatimeProjectName.length > 0) {
+      // Cross-check the linked Hackatime account still belongs to this user
+      // before accepting any of its project names.
+      await this.hackatimeService.verifyAccountOwnership(hcaSub);
       const realProjects = await this.hackatimeService.getProjectNames(hcaSub);
       for (const raw of dto.hackatimeProjectName) {
         if (typeof raw !== 'string') continue;
@@ -325,6 +328,7 @@ export class ProjectsService {
       if (dto.hackatimeProjectName === null || (Array.isArray(dto.hackatimeProjectName) && dto.hackatimeProjectName.length === 0)) {
         project.hackatimeProjectName = [];
       } else if (Array.isArray(dto.hackatimeProjectName)) {
+        await this.hackatimeService.verifyAccountOwnership(hcaSub);
         const realProjects = await this.hackatimeService.getProjectNames(hcaSub);
         const validated: string[] = [];
         for (const raw of dto.hackatimeProjectName) {
@@ -354,6 +358,12 @@ export class ProjectsService {
       if (dto.status === 'unreviewed') {
         if (project.status !== 'unshipped' && project.status !== 'changes_needed') {
           throw new BadRequestException('Invalid status transition');
+        }
+        // Re-verify Hackatime account ownership at submit time, even if the
+        // linked names weren't touched in this request. Catches projects that
+        // were created before this guard existed.
+        if ((project.hackatimeProjectName ?? []).length > 0) {
+          await this.hackatimeService.verifyAccountOwnership(hcaSub);
         }
         project.status = 'unreviewed';
       } else if (
@@ -462,6 +472,7 @@ export class ProjectsService {
     const linkedNames = (project.hackatimeProjectName ?? []).filter((n) => !!n);
     const previousApprovedHours = project.overrideHours ?? 0;
     if (linkedNames.length > 0) {
+      await this.hackatimeService.verifyAccountOwnership(hcaSub);
       try {
         const { hours: currentHours } = await this.hackatimeService.getHoursForProjects(
           hcaSub,

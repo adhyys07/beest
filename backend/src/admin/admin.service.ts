@@ -447,6 +447,25 @@ export class AdminService {
 
   // ── Hackatime admin lookup ──
 
+  private emptyHackatimeResult(projectId: string, user: User | null) {
+    return {
+      projectId,
+      hackatimeProjects: [],
+      totalHours: 0,
+      earliestHeartbeat: null,
+      previousApprovedHours: 0,
+      trustLevel: null,
+      linkedBanned: false,
+      linkedEmail: null,
+      linkedSlackUid: null,
+      beestEmail: user?.email ?? null,
+      beestSlackId: user?.slackId ?? null,
+      emailMismatch: false,
+      unifiedDuplicate: false,
+      unifiedError: true,
+    };
+  }
+
   private async hackatimeGet(path: string): Promise<Response> {
     return fetchWithTimeout(`${this.hackatimeBaseUrl}${path}`, {
       headers: { Authorization: `Bearer ${this.hackatimeAdminKey}` },
@@ -478,7 +497,7 @@ export class AdminService {
     const hackatimeNames: string[] = project.hackatimeProjectName ?? [];
     const user = project.user;
     if (!user) {
-      return { projectId, hackatimeProjects: [], totalHours: 0, earliestHeartbeat: null, previousApprovedHours: 0, trustLevel: null, unifiedDuplicate: false, unifiedError: true };
+      return this.emptyHackatimeResult(projectId, user);
     }
 
     try {
@@ -520,7 +539,7 @@ export class AdminService {
         }
       }
       if (!hackatimeUserId) {
-        return { projectId, hackatimeProjects: [], totalHours: 0, earliestHeartbeat: null, previousApprovedHours: 0, trustLevel: null, unifiedDuplicate: false, unifiedError: true };
+        return this.emptyHackatimeResult(projectId, user);
       }
 
       // 2. Get user info (trust level), projects, and Unified duplicate check in parallel
@@ -539,9 +558,27 @@ export class AdminService {
       };
 
       let trustLevel: string | null = null;
+      let linkedBanned = false;
+      let linkedEmail: string | null = null;
+      let linkedSlackUid: string | null = null;
+      let emailMismatch = false;
       if (infoRes.ok) {
         const infoData = await infoRes.json();
-        trustLevel = infoData?.user?.trust_level ?? infoData?.data?.trust_level ?? infoData?.trust_level ?? null;
+        const u = infoData?.user ?? infoData?.data ?? infoData ?? {};
+        trustLevel = u?.trust_level ?? u?.trust_factor?.trust_level ?? null;
+        linkedBanned = u?.banned === true;
+        linkedSlackUid = typeof u?.slack_uid === 'string' ? u.slack_uid : null;
+        const rawEmails = u?.email_addresses ?? u?.emails ?? [];
+        if (Array.isArray(rawEmails) && rawEmails.length > 0) {
+          const emails = rawEmails.filter(
+            (e): e is string => typeof e === 'string',
+          );
+          linkedEmail = emails[0] ?? null;
+          if (user.email) {
+            const own = user.email.toLowerCase();
+            emailMismatch = !emails.some((e) => e.toLowerCase() === own);
+          }
+        }
       }
 
       let matched: { name: string; hours: number; languages: string[]; firstHeartbeat: number | null }[] = [];
@@ -597,10 +634,41 @@ export class AdminService {
       });
       const previousApprovedHours = lastApprovedSub?.overrideHours ?? 0;
 
-      return { projectId, hackatimeProjects: matched, totalHours, earliestHeartbeat, previousApprovedHours, trustLevel, unifiedDuplicate: unifiedResult.duplicate, unifiedError: unifiedResult.error, debug };
+      return {
+        projectId,
+        hackatimeProjects: matched,
+        totalHours,
+        earliestHeartbeat,
+        previousApprovedHours,
+        trustLevel,
+        linkedBanned,
+        linkedEmail,
+        linkedSlackUid,
+        beestEmail: user.email ?? null,
+        beestSlackId: user.slackId ?? null,
+        emailMismatch,
+        unifiedDuplicate: unifiedResult.duplicate,
+        unifiedError: unifiedResult.error,
+        debug,
+      };
     } catch (err) {
       this.logger.error(`Hackatime admin lookup error for project ${projectId}: ${err}`);
-      return { projectId, hackatimeProjects: [], totalHours: 0, earliestHeartbeat: null, previousApprovedHours: 0, trustLevel: null, unifiedDuplicate: false, unifiedError: true };
+      return {
+        projectId,
+        hackatimeProjects: [],
+        totalHours: 0,
+        earliestHeartbeat: null,
+        previousApprovedHours: 0,
+        trustLevel: null,
+        linkedBanned: false,
+        linkedEmail: null,
+        linkedSlackUid: null,
+        beestEmail: null,
+        beestSlackId: null,
+        emailMismatch: false,
+        unifiedDuplicate: false,
+        unifiedError: true,
+      };
     }
   }
 

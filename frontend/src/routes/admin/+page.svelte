@@ -93,6 +93,12 @@
 		earliestHeartbeat: number | null;
 		previousApprovedHours: number;
 		trustLevel: string | null;
+		linkedBanned: boolean;
+		linkedEmail: string | null;
+		linkedSlackUid: string | null;
+		beestEmail: string | null;
+		beestSlackId: string | null;
+		emailMismatch: boolean;
 		hackatimeProjects: { name: string; hours: number; languages: string[]; firstHeartbeat: number | null }[];
 		unifiedDuplicate: boolean;
 		unifiedError: boolean;
@@ -101,6 +107,7 @@
 	let hackatimeData = $state<HackatimeDetail | null>(null);
 	let hackatimeLoading = $state(false);
 	let overrideJustification = $state('');
+	let lastAutoJustification = $state('');
 	let userFeedback = $state('');
 	let internalNote = $state('');
 	let reviewSubmitting = $state(false);
@@ -160,6 +167,11 @@
 
 	function buildJustification(adjustedHours: number, label: string) {
 		if (!hackatimeData) return;
+		// Don't clobber reviewer-edited text — only regenerate when the
+		// textarea still matches the last auto-generated value (or is empty).
+		if (overrideJustification !== '' && overrideJustification !== lastAutoJustification) {
+			return;
+		}
 		const trustLabels: Record<string, string> = { blue: 'standard', yellow: 'warned', red: 'banned' };
 		const trustLabel = trustLabels[hackatimeData.trustLevel?.toLowerCase() ?? ''] ?? hackatimeData.trustLevel ?? 'unknown';
 		const proj = allProjects.find(p => p.id === expandedProjectId);
@@ -168,7 +180,9 @@
 		const htNamesNote = htNames ? `\nHackatime projects: ${htNames}` : '';
 		const prevHours = hackatimeData.previousApprovedHours ?? 0;
 		const deltaNote = prevHours > 0 ? `\nPreviously approved: ${prevHours}h — delta: ${Math.round((adjustedHours - prevHours) * 10) / 10}h` : '';
-		overrideJustification = `the user has trust level ${trustLabel} and tracked ${hackatimeData.totalHours} hours on the project through hackatime (${label} to ${adjustedHours}h)${updateNote}${htNamesNote}${deltaNote}\n\nsigned off by ${data.user.name ?? 'unknown'}`;
+		const next = `the user has trust level ${trustLabel} and tracked ${hackatimeData.totalHours} hours on the project through hackatime (${label} to ${adjustedHours}h)${updateNote}${htNamesNote}${deltaNote}\n\nsigned off by ${data.user.name ?? 'unknown'}`;
+		overrideJustification = next;
+		lastAutoJustification = next;
 	}
 
 	function adjustHours(factor: number) {
@@ -196,7 +210,9 @@
 		const htNamesNote = htNames ? `\nHackatime projects: ${htNames}` : '';
 		const prevHours = hackatimeData?.previousApprovedHours ?? 0;
 		const deltaNote = prevHours > 0 ? `\nPreviously approved: ${prevHours}h — delta: ${Math.round((customHours - prevHours) * 10) / 10}h` : '';
-		overrideJustification = `the user has trust level ${trustLabel} and tracked ${hackatimeData?.totalHours ?? 0} hours on the project through hackatime${updateNote}${htNamesNote}${deltaNote}${unifiedNote}\n\nsigned off by ${data.user.name ?? 'unknown'}`;
+		const next = `the user has trust level ${trustLabel} and tracked ${hackatimeData?.totalHours ?? 0} hours on the project through hackatime${updateNote}${htNamesNote}${deltaNote}${unifiedNote}\n\nsigned off by ${data.user.name ?? 'unknown'}`;
+		overrideJustification = next;
+		lastAutoJustification = next;
 	}
 
 	async function selectProject(projectId: string) {
@@ -213,6 +229,7 @@
 		userFeedback = '';
 		internalNote = '';
 		overrideJustification = '';
+		lastAutoJustification = '';
 		pastReviews = [];
 
 		const proj = allProjects.find(p => p.id === projectId);
@@ -224,10 +241,10 @@
 				if (res.ok) {
 					hackatimeData = await res.json();
 				} else {
-					hackatimeData = { totalHours: 0, earliestHeartbeat: null, previousApprovedHours: 0, hackatimeProjects: [], trustLevel: null, unifiedDuplicate: false, unifiedError: true };
+					hackatimeData = { totalHours: 0, earliestHeartbeat: null, previousApprovedHours: 0, hackatimeProjects: [], trustLevel: null, linkedBanned: false, linkedEmail: null, linkedSlackUid: null, beestEmail: null, beestSlackId: null, emailMismatch: false, unifiedDuplicate: false, unifiedError: true };
 				}
 			} catch {
-				hackatimeData = { totalHours: 0, earliestHeartbeat: null, previousApprovedHours: 0, hackatimeProjects: [], trustLevel: null, unifiedDuplicate: false, unifiedError: true };
+				hackatimeData = { totalHours: 0, earliestHeartbeat: null, previousApprovedHours: 0, hackatimeProjects: [], trustLevel: null, linkedBanned: false, linkedEmail: null, linkedSlackUid: null, beestEmail: null, beestSlackId: null, emailMismatch: false, unifiedDuplicate: false, unifiedError: true };
 			} finally {
 				hackatimeLoading = false;
 				customHours = hackatimeData?.totalHours ?? 0;
@@ -1282,6 +1299,22 @@
 													<span class="ht-delta">prev: {hackatimeData.previousApprovedHours}h — delta: {Math.round((hackatimeData.totalHours - hackatimeData.previousApprovedHours) * 10) / 10}h</span>
 												{/if}
 											</div>
+											{#if hackatimeData.linkedBanned || hackatimeData.emailMismatch || hackatimeData.trustLevel === 'red'}
+												<div class="ht-ownership-alert">
+													{#if hackatimeData.emailMismatch}
+														<div><strong>⚠ Hackatime account mismatch.</strong> The linked Hackatime user does not contain this builder's email — strongly suggests a shared/alt account.</div>
+													{/if}
+													{#if hackatimeData.linkedBanned || hackatimeData.trustLevel === 'red'}
+														<div><strong>⚠ Linked Hackatime account is banned</strong> (trust: {hackatimeData.trustLevel ?? 'unknown'}{hackatimeData.linkedBanned ? ', banned=true' : ''}).</div>
+													{/if}
+													<div class="ht-ownership-meta">
+														<div>Beest email: <code>{hackatimeData.beestEmail ?? '—'}</code></div>
+														<div>Beest Slack: <code>{hackatimeData.beestSlackId ?? '—'}</code></div>
+														<div>Linked Hackatime email: <code>{hackatimeData.linkedEmail ?? '—'}</code></div>
+														<div>Linked Hackatime Slack: <code>{hackatimeData.linkedSlackUid ?? '—'}</code></div>
+													</div>
+												</div>
+											{/if}
 											{#if hackatimeData.hackatimeProjects.length > 0}
 												<div class="ht-projects">
 													{#each hackatimeData.hackatimeProjects as hp}
@@ -2555,6 +2588,37 @@
 		padding: 0.5rem 0.75rem;
 		margin-bottom: 0.5rem;
 	}
+
+	.ht-ownership-alert {
+		background: rgba(220, 50, 50, 0.12);
+		border: 2px solid #c44040;
+		border-radius: 6px;
+		color: #f6a0a0;
+		font-size: 0.85rem;
+		padding: 0.6rem 0.75rem;
+		margin-bottom: 0.5rem;
+		display: flex;
+		flex-direction: column;
+		gap: 0.35rem;
+	}
+	.ht-ownership-alert strong { color: #ff6b6b; }
+	.ht-ownership-meta {
+		display: grid;
+		grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+		gap: 0.2rem 0.75rem;
+		font-size: 0.78rem;
+		color: #e0c8c8;
+		margin-top: 0.25rem;
+	}
+	.ht-ownership-meta code {
+		background: rgba(0, 0, 0, 0.25);
+		padding: 0.05rem 0.25rem;
+		border-radius: 3px;
+	}
+	.admin-shell.light .ht-ownership-alert { background: rgba(220, 50, 50, 0.08); color: #8a2020; }
+	.admin-shell.light .ht-ownership-alert strong { color: #c02020; }
+	.admin-shell.light .ht-ownership-meta { color: #6a2020; }
+	.admin-shell.light .ht-ownership-meta code { background: rgba(0, 0, 0, 0.06); }
 
 	.unified-error-alert {
 		background: rgba(212, 165, 90, 0.15);
