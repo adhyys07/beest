@@ -15,6 +15,19 @@
   import { onMount } from 'svelte';
   import confetti from 'canvas-confetti';
 
+  // Portal action: moves a node to document.body so its position:fixed
+  // escapes any ancestor containing-block (body has filter: saturate which
+  // otherwise pins fixed descendants to body, making modals drift on long pages).
+  function portal(node: HTMLElement) {
+    const target = document.body;
+    target.appendChild(node);
+    return {
+      destroy() {
+        if (node.parentNode) node.parentNode.removeChild(node);
+      },
+    };
+  }
+
   let { data } = $props();
 
   let mobileWarningDismissed = $state(false);
@@ -1514,7 +1527,7 @@
     <!-- Fullscreen shop item modal -->
     {#if selectedShopItem}
     <!-- svelte-ignore a11y_no_static_element_interactions -->
-    <div class="shop-modal-overlay" onclick={closeShopItem} onkeydown={(e) => { if (e.key === 'Escape') closeShopItem(); }}>
+    <div use:portal class="shop-modal-overlay" onclick={closeShopItem} onkeydown={(e) => { if (e.key === 'Escape') closeShopItem(); }}>
       <!-- svelte-ignore a11y_no_static_element_interactions -->
       <div class="shop-modal" onclick={(e) => e.stopPropagation()}>
         <button class="shop-modal-close" onclick={closeShopItem} type="button" aria-label="Close">&times;</button>
@@ -2004,7 +2017,6 @@
     margin: 0;
     padding: 0;
     background: #4b4840;
-    filter: saturate(1.5);
   }
 
   /* ── layout ──────────────────────────────────────── */
@@ -2012,6 +2024,7 @@
     display: flex;
     min-height: 100vh;
     background: #4b4840;
+    filter: saturate(1.5);
   }
 
 
@@ -4474,8 +4487,8 @@
 
   .explore-grid {
     display: grid;
-    grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
-    gap: 28px;
+    grid-template-columns: repeat(auto-fill, minmax(200px, 240px));
+    gap: 20px;
     opacity: 0.35;
   }
 
@@ -4606,21 +4619,21 @@
   }
 
   .explore-card-body {
-    padding: 14px 16px 16px;
+    padding: 10px 12px 12px;
     display: flex;
     flex-direction: column;
-    gap: 8px;
+    gap: 6px;
   }
 
   .explore-card-header {
     display: flex;
     align-items: center;
-    gap: 10px;
+    gap: 8px;
   }
 
   .explore-card-name {
     font-family: "Sunny Mood", "Courier New", monospace;
-    font-size: 22px;
+    font-size: 17px;
     color: #e6f4fe;
     text-shadow: 2px 2px 0 rgba(0, 0, 0, 0.3);
     margin: 0;
@@ -4628,30 +4641,30 @@
 
   .explore-card-type {
     font-family: "Courier New", monospace;
-    font-size: 11px;
+    font-size: 9px;
     font-weight: 700;
     text-transform: uppercase;
     letter-spacing: 0.06em;
     color: #3a3832;
     background: #cbc1ae;
-    padding: 3px 8px;
+    padding: 2px 6px;
     clip-path: polygon(4% 0%, 96% 4%, 100% 96%, 0% 100%);
   }
 
   .explore-card-desc {
     font-family: "Courier New", monospace;
-    font-size: 13px;
+    font-size: 11px;
     color: rgba(230, 244, 254, 0.7);
-    line-height: 1.4;
+    line-height: 1.35;
     margin: 0;
   }
 
   .explore-card-meta {
     display: flex;
     align-items: center;
-    gap: 12px;
+    gap: 10px;
     font-family: "Courier New", monospace;
-    font-size: 12px;
+    font-size: 10px;
     color: rgba(230, 244, 254, 0.45);
   }
 
@@ -4662,13 +4675,13 @@
 
   .explore-card-links {
     display: flex;
-    gap: 10px;
-    margin-top: 4px;
+    gap: 8px;
+    margin-top: 2px;
   }
 
   .explore-link {
     font-family: "Courier New", monospace;
-    font-size: 13px;
+    font-size: 11px;
     font-weight: 700;
     color: #93b4cd;
     text-decoration: none;
