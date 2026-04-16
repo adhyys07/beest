@@ -226,7 +226,11 @@
     window.removeEventListener('keydown', blockKeys);
   }
 
-  beforeNavigate(cleanupListeners);
+  beforeNavigate(() => {
+    // Skip or complete — either way the user is leaving the tutorial, mark them onboarded
+    fetch('/api/onboarding/mark-onboarded', { method: 'POST', keepalive: true }).catch(() => {});
+    cleanupListeners();
+  });
 
   // Measure total path length of all letter paths once mounted
   let pathEls: SVGPathElement[] = [];

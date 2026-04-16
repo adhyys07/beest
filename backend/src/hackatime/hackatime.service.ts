@@ -188,6 +188,10 @@ export class HackatimeService implements OnModuleInit {
 
     await this.auditLogService.log(user.id, 'hackatime_connected', 'Connected Hackatime', impersonatorName);
 
+    if (user.email) {
+      this.rsvpService.updateDateField(user.email, 'Loops - beestHackatimeSynched');
+    }
+
     return { success: true, redirectTo: '/tutorial?stage=2' };
   }
 

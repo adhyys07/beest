@@ -32,6 +32,21 @@ export class OnboardingController {
     return { ok: true };
   }
 
+  @Throttle({ default: { limit: 10, ttl: 60000 } })
+  @UseGuards(JwtAuthGuard)
+  @Post('mark-onboarded')
+  async markOnboarded(@Req() req: Request) {
+    const user = (req as any).user;
+    const dbUser = await this.userRepo.findOne({
+      where: { hcaSub: user.sub },
+      select: ['email'],
+    });
+    if (dbUser?.email) {
+      this.rsvpService.updateDateField(dbUser.email, 'Loops - beestOnboarded');
+    }
+    return { ok: true };
+  }
+
   /**
    * Returns completion status for each onboarding step.
    * The frontend uses this to show "Complete! Move on?" vs action buttons.
