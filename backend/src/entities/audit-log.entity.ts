@@ -20,6 +20,7 @@ export const AUDIT_ACTIONS = [
   'admin_perms_change',
   'project_reviewed',
   'admin_impersonate',
+  'admin_resync_airtable',
   'shop_purchase',
   'order_fulfilled',
 ] as const;

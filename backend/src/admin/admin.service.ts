@@ -418,6 +418,42 @@ export class AdminService {
     await this.rsvpService.createApprovedProjectRecord(cleanFields);
   }
 
+  async resyncProjectToAirtable(projectId: string, reviewerId: string) {
+    const project = await this.projectRepo.findOne({
+      where: { id: projectId },
+      relations: ['user'],
+    });
+    if (!project) throw new NotFoundException('Project not found');
+    if (project.status !== 'approved') {
+      throw new BadRequestException('Only approved projects can be re-pushed to Airtable');
+    }
+
+    // Find the latest review for this project to include override justification
+    const latestReview = await this.reviewRepo.findOne({
+      where: { projectId },
+      order: { createdAt: 'DESC' },
+    });
+
+    // Re-sync the funnel date fields
+    if (project.user?.email) {
+      this.rsvpService.updateDateField(project.user.email, 'Loops - beestApprovedProject');
+    }
+
+    // Re-push the full project record to Airtable Projects table
+    await this.syncApprovedProjectToAirtable(
+      project,
+      latestReview ?? ({} as ProjectReview),
+    );
+
+    await this.auditLogService.log(
+      reviewerId,
+      'admin_resync_airtable',
+      `Re-pushed project "${project.name}" to Airtable`,
+    );
+
+    return { success: true };
+  }
+
   async getProjectReviews(projectId: string, includeInternal: boolean) {
     const reviews = await this.reviewRepo.find({
       where: { projectId },

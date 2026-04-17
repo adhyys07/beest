@@ -149,6 +149,16 @@ export class AdminController {
     return this.adminService.getProjectReviews(id, true);
   }
 
+  @UseGuards(ReviewerGuard)
+  @Post('projects/:id/resync-airtable')
+  async resyncAirtable(
+    @Param('id', ParseUUIDPipe) id: string,
+    @Req() req: Request,
+  ) {
+    const reviewerId = (req as any).user?.uid;
+    return this.adminService.resyncProjectToAirtable(id, reviewerId);
+  }
+
   // ── News CRUD ──
 
   @UseGuards(SuperAdminGuard)
