@@ -449,10 +449,15 @@ export class AdminService {
     }
 
     // Re-push the full project record to Airtable Projects table
-    await this.syncApprovedProjectToAirtable(
-      project,
-      latestReview ?? ({} as ProjectReview),
-    );
+    try {
+      await this.syncApprovedProjectToAirtable(
+        project,
+        latestReview ?? ({} as ProjectReview),
+      );
+    } catch (err) {
+      this.logger.error(`Airtable resync failed for project ${projectId}: ${err}`);
+      throw new BadRequestException('Failed to push project to Airtable — check server logs');
+    }
 
     await this.auditLogService.log(
       reviewerId,

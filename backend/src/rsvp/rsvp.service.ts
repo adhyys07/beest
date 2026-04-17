@@ -226,23 +226,20 @@ export class RsvpService {
 
 
   async createApprovedProjectRecord(fields: Record<string, any>): Promise<void> {
-    try {
-      const tableName = this.config.get<string>('AIRTABLE_PROJECTS_TABLE_NAME', 'Projects');
-      const url = `https://api.airtable.com/v0/${this.airtableBaseId}/${encodeURIComponent(tableName)}`;
-      const res = await fetchWithTimeout(url, {
-        method: 'POST',
-        headers: {
-          Authorization: `Bearer ${this.airtableApiKey}`,
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({ records: [{ fields }] }),
-      });
-      if (!res.ok) {
-        const text = await res.text();
-        console.error('Airtable createApprovedProjectRecord error:', res.status, text);
-      }
-    } catch (err) {
-      console.error('Airtable createApprovedProjectRecord failed:', err);
+    const tableName = this.config.get<string>('AIRTABLE_PROJECTS_TABLE_NAME', 'Projects');
+    const url = `https://api.airtable.com/v0/${this.airtableBaseId}/${encodeURIComponent(tableName)}`;
+    const res = await fetchWithTimeout(url, {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${this.airtableApiKey}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({ records: [{ fields }] }),
+    });
+    if (!res.ok) {
+      const text = await res.text();
+      console.error('Airtable createApprovedProjectRecord error:', res.status, text);
+      throw new Error(`Airtable API error (${res.status}): ${text}`);
     }
   }
 

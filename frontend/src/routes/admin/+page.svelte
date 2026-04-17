@@ -161,8 +161,12 @@
 		resyncLoading = true;
 		try {
 			const res = await fetch(`/api/admin/projects/${expandedProjectId}/resync-airtable`, { method: 'POST' });
-			if (res.ok) alert('Project re-pushed to Airtable.');
-			else alert('Failed to re-push to Airtable.');
+			if (res.ok) {
+				alert('Project re-pushed to Airtable.');
+			} else {
+				const data = await res.json().catch(() => null);
+				alert(data?.message ?? 'Failed to re-push to Airtable.');
+			}
 		} catch {
 			alert('Failed to re-push to Airtable.');
 		} finally {
