@@ -157,6 +157,7 @@ export class ProjectsService {
         'isUpdate',
         'otherHcProgram',
         'aiUse',
+        'overrideHours',
         'createdAt',
         'updatedAt',
       ],
