@@ -1153,7 +1153,7 @@
                     {#if hackatimeLoading}
                       <span class="hackatime-empty">Loading...</span>
                     {:else if hackatimeProjects.length === 0}
-                      <span class="hackatime-empty">No projects found</span>
+                      <span class="hackatime-empty">No projects found, redo tutorial?</span>
                     {:else}
                       {#each hackatimeProjects as proj}
                         <label class="hackatime-option">
