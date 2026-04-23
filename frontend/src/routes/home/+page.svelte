@@ -1172,11 +1172,13 @@
                   </div>
                 {/if}
               </div>
-              <button type="button" class="refresh-btn" onclick={fetchHackatimeProjects} disabled={hackatimeLoading} title="Refresh Hackatime projects">
-                <svg class="refresh-icon" class:spinning={hackatimeLoading} viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                  <path d="M21.5 2v6h-6M2.5 22v-6h6M2 11.5a10 10 0 0 1 18.8-4.3M22 12.5a10 10 0 0 1-18.8 4.3" />
-                </svg>
-              </button>
+              <form method="POST" action="/api/auth/hackatime/start" target="_blank" rel="noopener" class="refresh-form" onsubmit={() => { fetchHackatimeProjects(); setTimeout(fetchHackatimeProjects, 30000); }}>
+                <button type="submit" class="refresh-btn" disabled={hackatimeLoading} title="Refresh & re-link Hackatime">
+                  <svg class="refresh-icon" class:spinning={hackatimeLoading} viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                    <path d="M21.5 2v6h-6M2.5 22v-6h6M2 11.5a10 10 0 0 1 18.8-4.3M22 12.5a10 10 0 0 1-18.8 4.3" />
+                  </svg>
+                </button>
+              </form>
             </div>
           </div>
         </div>
@@ -3343,6 +3345,10 @@
     color: #999;
     padding: 5px 8px;
     padding: 4px;
+  }
+
+  .refresh-form {
+    display: contents;
   }
 
   .refresh-btn {
