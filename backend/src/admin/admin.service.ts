@@ -42,6 +42,13 @@ export class AdminService {
   private dauCache: { count: number; timestamp: number } | null = null;
   private readonly DAU_CACHE_TTL = 5 * 60 * 1000;
 
+  // Signups history cache (10-minute TTL) — Airtable call is moderately expensive
+  private signupsCache: {
+    payload: { daily: { date: string; count: number }[]; cumulative: { date: string; count: number }[]; total: number };
+    timestamp: number;
+  } | null = null;
+  private readonly SIGNUPS_CACHE_TTL = 10 * 60 * 1000;
+
   // DAU history: cache of finalised per-day counts (YYYY-MM-DD → count).
   // Entries are only written for dates that are fully in the past (UTC),
   // so they never need invalidation.
@@ -1087,6 +1094,76 @@ export class AdminService {
       cursor += 86400_000;
     }
     return out;
+  }
+
+  // ── Signups + funnel ──
+
+  async getSignupsHistory(): Promise<{
+    daily: { date: string; count: number }[];
+    cumulative: { date: string; count: number }[];
+    total: number;
+  }> {
+    if (this.signupsCache && Date.now() - this.signupsCache.timestamp < this.SIGNUPS_CACHE_TTL) {
+      return this.signupsCache.payload;
+    }
+
+    const timestamps = await this.rsvpService.getAllSignupTimestamps();
+
+    const dailyMap = new Map<string, number>();
+    for (const ts of timestamps) {
+      const day = AdminService.ymdUtc(new Date(ts));
+      dailyMap.set(day, (dailyMap.get(day) ?? 0) + 1);
+    }
+
+    const daily = Array.from(dailyMap.entries())
+      .sort(([a], [b]) => a.localeCompare(b))
+      .map(([date, count]) => ({ date, count }));
+
+    const cumulative: { date: string; count: number }[] = [];
+    let running = 0;
+    for (const d of daily) {
+      running += d.count;
+      cumulative.push({ date: d.date, count: running });
+    }
+
+    const payload = { daily, cumulative, total: timestamps.length };
+    this.signupsCache = { payload, timestamp: Date.now() };
+    return payload;
+  }
+
+  async getUserFunnel(): Promise<{
+    signedUp: number;
+    loggedIn: number;
+    linkedHackatime: number;
+    submittedProject: number;
+    approvedProject: number;
+  }> {
+    const signupsHistory = await this.getSignupsHistory().catch(() => null);
+
+    const [loggedIn, linkedHackatime, submittedRaw, approvedRaw] = await Promise.all([
+      this.userRepo.count(),
+      this.userRepo
+        .createQueryBuilder('u')
+        .where('u.hackatime_user_id IS NOT NULL')
+        .getCount(),
+      this.projectRepo
+        .createQueryBuilder('p')
+        .select('COUNT(DISTINCT p.user_id)', 'c')
+        .getRawOne<{ c: string }>(),
+      this.projectRepo
+        .createQueryBuilder('p')
+        .select('COUNT(DISTINCT p.user_id)', 'c')
+        .where('p.status = :status', { status: 'approved' })
+        .getRawOne<{ c: string }>(),
+    ]);
+
+    return {
+      signedUp: signupsHistory?.total ?? 0,
+      loggedIn,
+      linkedHackatime,
+      submittedProject: Number(submittedRaw?.c ?? 0),
+      approvedProject: Number(approvedRaw?.c ?? 0),
+    };
   }
 
   // ── News CRUD ──

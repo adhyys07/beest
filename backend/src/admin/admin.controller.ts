@@ -119,6 +119,18 @@ export class AdminController {
     return this.adminService.getDauHistory();
   }
 
+  @UseGuards(SuperAdminGuard)
+  @Get('stats/signups')
+  getSignupsHistory() {
+    return this.adminService.getSignupsHistory();
+  }
+
+  @UseGuards(SuperAdminGuard)
+  @Get('stats/funnel')
+  getUserFunnel() {
+    return this.adminService.getUserFunnel();
+  }
+
   // ── Projects ──
 
   @UseGuards(ReviewerGuard)

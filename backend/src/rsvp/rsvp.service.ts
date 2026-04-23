@@ -151,6 +151,53 @@ export class RsvpService {
     return data.records?.[0]?.fields?.Perms ?? null;
   }
 
+  /**
+   * Fetches the Airtable `createdTime` of every RSVP/user record, sorted
+   * ascending.
+   *
+   * SAFETY: this method is the sole Airtable data source for admin stats
+   * (sign-ups chart + funnel). It must never pull records from any table
+   * other than the RSVP/user table — not Projects, not Approved Projects,
+   * not anything in the unified base. The allowed URL prefix is frozen on
+   * entry and every paged fetch is asserted against it.
+   */
+  async getAllSignupTimestamps(): Promise<string[]> {
+    const allowedPrefix = `https://api.airtable.com/v0/${this.airtableBaseId}/${encodeURIComponent(this.airtableTableName)}`;
+
+    const timestamps: string[] = [];
+    let offset: string | undefined;
+
+    do {
+      const searchParams = new URLSearchParams();
+      searchParams.append('pageSize', '100');
+      searchParams.append('fields[]', 'Email'); // limit payload — we only use createdTime
+      if (offset) searchParams.append('offset', offset);
+
+      const url = `${this.baseUrl}?${searchParams}`;
+      if (!url.startsWith(`${allowedPrefix}?`)) {
+        throw new HttpException(
+          'Sign-up stats fetch blocked: URL does not target the RSVP/user table',
+          HttpStatus.INTERNAL_SERVER_ERROR,
+        );
+      }
+
+      const res = await fetchWithTimeout(url, {
+        headers: { Authorization: `Bearer ${this.airtableApiKey}` },
+      });
+
+      if (!res.ok) break;
+
+      const data = await res.json();
+      for (const record of data.records ?? []) {
+        if (record.createdTime) timestamps.push(record.createdTime);
+      }
+      offset = data.offset;
+    } while (offset);
+
+    timestamps.sort();
+    return timestamps;
+  }
+
   async getAllPerms(): Promise<Map<string, string>> {
     const permsMap = new Map<string, string>();
     let offset: string | undefined;

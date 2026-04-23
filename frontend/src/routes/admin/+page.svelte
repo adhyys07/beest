@@ -1,5 +1,7 @@
 <script lang="ts">
 	import DauChart from './DauChart.svelte';
+	import SignupsChart from './SignupsChart.svelte';
+	import UserFunnel from './UserFunnel.svelte';
 	let { data } = $props();
 
 	interface UserSummary {
@@ -779,6 +781,7 @@
 			return;
 		}
 		if (activeTab === 'users') { loadUsers(); }
+		if (activeTab === 'stats') { loadUsers(); }
 		if (activeTab === 'news') loadNews();
 		if (activeTab === 'projects') loadProjects();
 		if (activeTab === 'shop') loadShop();
@@ -799,6 +802,7 @@
 	<nav class="admin-tabs">
 		{#if !isReviewer}
 			<button class="tab" class:active={activeTab === 'users'} onclick={() => { activeTab = 'users'; closeDetail(); }}>Users</button>
+			<button class="tab" class:active={activeTab === 'stats'} onclick={() => activeTab = 'stats'}>Stats</button>
 			<button class="tab" class:active={activeTab === 'news'} onclick={() => activeTab = 'news'}>News</button>
 			<button class="tab" class:active={activeTab === 'shop'} onclick={() => activeTab = 'shop'}>Shop</button>
 			<button class="tab" class:active={activeTab === 'fulfillment'} onclick={() => activeTab = 'fulfillment'}>Fulfillment</button>
@@ -812,17 +816,6 @@
 		{#if activeTab === 'users'}
 			<div class="users-layout" class:has-detail={selectedUser}>
 				<div class="users-table-wrap">
-					<div class="stat-cards">
-						<div class="stat-card">
-							<span class="stat-value">{totalUsers}</span>
-							<span class="stat-label">Total Users</span>
-						</div>
-						<div class="stat-card">
-							<span class="stat-value">{totalHackatime}</span>
-							<span class="stat-label">Hackatime Linked</span>
-						</div>
-					</div>
-					<DauChart />
 					<div class="users-toolbar">
 						<input type="text" placeholder="Search by name, email or Slack ID..." bind:value={userSearch} class="users-search" />
 						<select bind:value={permsFilter} class="users-perms-filter">
@@ -1033,6 +1026,24 @@
 						{/if}
 					</div>
 				{/if}
+			</div>
+		{:else if activeTab === 'stats'}
+			<div class="stats-section">
+				<div class="stat-cards">
+					<div class="stat-card">
+						<span class="stat-value">{totalUsers}</span>
+						<span class="stat-label">Logged-in Users</span>
+					</div>
+					<div class="stat-card">
+						<span class="stat-value">{totalHackatime}</span>
+						<span class="stat-label">Hackatime Linked</span>
+					</div>
+				</div>
+				<div class="stats-grid">
+					<DauChart />
+					<SignupsChart />
+				</div>
+				<UserFunnel />
 			</div>
 		{:else if activeTab === 'news'}
 			<div class="news-admin">
@@ -1694,6 +1705,23 @@
 		display: flex;
 		gap: 0.75rem;
 		margin-bottom: 1rem;
+	}
+
+	.stats-section {
+		display: flex;
+		flex-direction: column;
+	}
+
+	.stats-grid {
+		display: grid;
+		grid-template-columns: repeat(auto-fit, minmax(360px, 1fr));
+		gap: 1rem;
+		margin-bottom: 1rem;
+	}
+
+	.stats-grid :global(.dau-card),
+	.stats-grid :global(.signups-card) {
+		margin-bottom: 0;
 	}
 
 	.stat-card {
