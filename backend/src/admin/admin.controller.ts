@@ -67,6 +67,26 @@ export class AdminController {
   }
 
   @UseGuards(SuperAdminGuard)
+  @Patch('users/:id/pipes')
+  async adjustPipes(
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body() body: { delta?: number; reason?: string | null },
+    @Req() req: Request,
+  ) {
+    if (typeof body.delta !== 'number' || !Number.isInteger(body.delta) || body.delta === 0) {
+      throw new BadRequestException('delta must be a non-zero integer');
+    }
+    const MAX_DELTA = 100_000;
+    if (Math.abs(body.delta) > MAX_DELTA) {
+      throw new BadRequestException(`delta must be between -${MAX_DELTA} and ${MAX_DELTA}`);
+    }
+    const reason = typeof body.reason === 'string' ? body.reason.trim().slice(0, 200) : null;
+    const adminId = (req as any).user?.uid;
+    const result = await this.adminService.adjustPipes(id, body.delta, reason || null, adminId);
+    return { success: true, pipes: result.pipes };
+  }
+
+  @UseGuards(SuperAdminGuard)
   @Post('users/:id/impersonate')
   async impersonateUser(
     @Param('id', ParseUUIDPipe) id: string,

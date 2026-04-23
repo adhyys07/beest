@@ -371,6 +371,39 @@
 		}
 	}
 
+	let pipesAdjustAmount = $state(0);
+	let pipesAdjustReason = $state('');
+
+	async function adjustPipes(sign: 1 | -1) {
+		if (!selectedUser) return;
+		const amount = Math.floor(Math.abs(pipesAdjustAmount));
+		if (!Number.isFinite(amount) || amount <= 0) {
+			alert('Enter a positive whole number of pipes.');
+			return;
+		}
+		const delta = sign * amount;
+		const verb = sign > 0 ? 'GRANT' : 'REVOKE';
+		if (!confirm(`${verb} ${amount} pipes ${sign > 0 ? 'to' : 'from'} ${selectedUser.name ?? selectedUser.hcaSub}?`)) return;
+		actionLoading = 'pipes';
+		try {
+			const res = await fetch(`/api/admin/users/${selectedUser.id}/pipes`, {
+				method: 'PATCH',
+				headers: { 'Content-Type': 'application/json' },
+				body: JSON.stringify({ delta, reason: pipesAdjustReason.trim() || null })
+			});
+			if (res.ok) {
+				pipesAdjustAmount = 0;
+				pipesAdjustReason = '';
+				await selectUser(selectedUser);
+			} else {
+				const err = await res.json().catch(() => ({}));
+				alert(`Pipes adjustment failed: ${err.message ?? res.statusText}`);
+			}
+		} finally {
+			actionLoading = '';
+		}
+	}
+
 	async function updatePerms(perms: string) {
 		if (!selectedUser || !confirm(`Change this user's permissions to "${perms}"?`)) return;
 		actionLoading = 'perms';
@@ -918,6 +951,45 @@
 
 								<section class="detail-section">
 									<h3>Pipes Balance: {userDetail.pipes ?? 0}</h3>
+									{#if isSuperAdmin}
+										<div class="pipes-adjust">
+											<div class="pipes-adjust-row">
+												<input
+													type="number"
+													min="1"
+													step="1"
+													placeholder="Amount"
+													class="pipes-input"
+													bind:value={pipesAdjustAmount}
+													disabled={actionLoading !== ''}
+												/>
+												<input
+													type="text"
+													placeholder="Reason (optional)"
+													class="pipes-input pipes-input-reason"
+													bind:value={pipesAdjustReason}
+													maxlength="200"
+													disabled={actionLoading !== ''}
+												/>
+											</div>
+											<div class="pipes-adjust-row">
+												<button
+													class="btn btn-pipes-grant"
+													onclick={() => adjustPipes(1)}
+													disabled={actionLoading !== '' || !pipesAdjustAmount || pipesAdjustAmount <= 0}
+												>
+													{actionLoading === 'pipes' ? 'Working…' : `Grant ${Math.max(0, Math.floor(Math.abs(pipesAdjustAmount || 0)))}`}
+												</button>
+												<button
+													class="btn btn-pipes-revoke"
+													onclick={() => adjustPipes(-1)}
+													disabled={actionLoading !== '' || !pipesAdjustAmount || pipesAdjustAmount <= 0}
+												>
+													{actionLoading === 'pipes' ? 'Working…' : `Revoke ${Math.max(0, Math.floor(Math.abs(pipesAdjustAmount || 0)))}`}
+												</button>
+											</div>
+										</div>
+									{/if}
 								</section>
 
 								{#if userDetail.orders?.length > 0}
@@ -1872,6 +1944,47 @@
 		border-color: #20204a;
 	}
 	.btn-impersonate:hover:not(:disabled) { background: #1a1a3a; }
+
+	.pipes-adjust {
+		display: flex;
+		flex-direction: column;
+		gap: 0.5rem;
+		margin-top: 0.5rem;
+	}
+
+	.pipes-adjust-row {
+		display: flex;
+		gap: 0.5rem;
+		flex-wrap: wrap;
+	}
+
+	.pipes-input {
+		padding: 0.5rem 0.75rem;
+		background: #1a1a1a;
+		border: 1px solid #444;
+		border-radius: 6px;
+		color: #e0e0e0;
+		font-size: 0.85rem;
+		width: 120px;
+	}
+
+	.pipes-input-reason { flex: 1; min-width: 200px; width: auto; }
+
+	.pipes-input:focus { outline: none; border-color: #5b9bd5; }
+
+	.btn-pipes-grant {
+		background: #1e2a1e;
+		color: #7ac47a;
+		border-color: #2a4a2a;
+	}
+	.btn-pipes-grant:hover:not(:disabled) { background: #253525; }
+
+	.btn-pipes-revoke {
+		background: #2a1e1e;
+		color: #d58b5b;
+		border-color: #4a2a20;
+	}
+	.btn-pipes-revoke:hover:not(:disabled) { background: #352525; }
 
 	.perms-action { position: relative; }
 
@@ -3146,6 +3259,13 @@
 
 	.admin-shell.light .btn-impersonate { background: #d0dff5; color: #2255a0; border-color: #5577aa; }
 	.admin-shell.light .btn-impersonate:hover:not(:disabled) { background: #c0d0f0; }
+
+	.admin-shell.light .pipes-input { background: #fff; color: #1a1a1a; border-color: #666; }
+	.admin-shell.light .pipes-input:focus { border-color: #3b7bb5; }
+	.admin-shell.light .btn-pipes-grant { background: #d5eed5; color: #2a7a2a; border-color: #70a070; }
+	.admin-shell.light .btn-pipes-grant:hover:not(:disabled) { background: #c0e0c0; }
+	.admin-shell.light .btn-pipes-revoke { background: #f0dbc0; color: #a05a20; border-color: #b08060; }
+	.admin-shell.light .btn-pipes-revoke:hover:not(:disabled) { background: #e8cba8; }
 
 	/* Perms dropdown */
 	.admin-shell.light .perms-dropdown { background: #fff; border-color: #666; }

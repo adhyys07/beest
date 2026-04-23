@@ -210,6 +210,45 @@ export class AdminService {
     return { success: true };
   }
 
+  async adjustPipes(
+    userId: string,
+    delta: number,
+    reason: string | null,
+    adminId?: string,
+  ): Promise<{ pipes: number }> {
+    if (!Number.isInteger(delta) || delta === 0) {
+      throw new BadRequestException('delta must be a non-zero integer');
+    }
+
+    const user = await this.userRepo.findOne({ where: { id: userId } });
+    if (!user) throw new NotFoundException('User not found');
+
+    const current = user.pipes ?? 0;
+    const next = current + delta;
+    if (next < 0) {
+      throw new BadRequestException(
+        `Cannot revoke ${-delta} pipes — user only has ${current}`,
+      );
+    }
+
+    if (delta > 0) {
+      await this.userRepo.increment({ id: userId }, 'pipes', delta);
+    } else {
+      await this.userRepo.decrement({ id: userId }, 'pipes', -delta);
+    }
+
+    const identifier = user.name || user.slackId || user.hcaSub;
+    const verb = delta > 0 ? 'Granted' : 'Revoked';
+    const reasonSuffix = reason ? ` — ${reason}` : '';
+    const label = `${verb} ${Math.abs(delta)} pipes (${identifier}, ${current} → ${next})${reasonSuffix}`;
+    await this.auditLogService.log(userId, 'admin_pipes_adjust', label);
+    if (adminId) {
+      await this.auditLogService.log(adminId, 'admin_pipes_adjust', label);
+    }
+
+    return { pipes: next };
+  }
+
   async updatePerms(userId: string, perms: string, adminId?: string): Promise<void> {
     if (!VALID_PERMS.includes(perms as any)) {
       throw new BadRequestException(
