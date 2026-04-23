@@ -1,4 +1,5 @@
 <script lang="ts">
+	import DauChart from './DauChart.svelte';
 	let { data } = $props();
 
 	interface UserSummary {
@@ -300,18 +301,6 @@
 
 	const totalUsers = $derived(users.length);
 	const totalHackatime = $derived(users.filter(u => u.hackatimeConnected).length);
-
-	// Daily Active Users
-	let dauCount = $state<number | null>(null);
-	async function loadDau() {
-		try {
-			const res = await fetch('/api/admin/stats/dau');
-			if (res.ok) {
-				const data = await res.json();
-				dauCount = data.count;
-			}
-		} catch {}
-	}
 
 	let filteredUsers = $derived.by(() => {
 		let result = users;
@@ -756,7 +745,7 @@
 			activeTab = 'projects';
 			return;
 		}
-		if (activeTab === 'users') { loadUsers(); loadDau(); }
+		if (activeTab === 'users') { loadUsers(); }
 		if (activeTab === 'news') loadNews();
 		if (activeTab === 'projects') loadProjects();
 		if (activeTab === 'shop') loadShop();
@@ -799,11 +788,8 @@
 							<span class="stat-value">{totalHackatime}</span>
 							<span class="stat-label">Hackatime Linked</span>
 						</div>
-						<div class="stat-card">
-							<span class="stat-value">{dauCount !== null ? dauCount : '…'}</span>
-							<span class="stat-label">Daily Active Users</span>
-						</div>
 					</div>
+					<DauChart />
 					<div class="users-toolbar">
 						<input type="text" placeholder="Search by name, email or Slack ID..." bind:value={userSearch} class="users-search" />
 						<select bind:value={permsFilter} class="users-perms-filter">

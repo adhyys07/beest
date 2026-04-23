@@ -93,6 +93,12 @@ export class AdminController {
     return this.adminService.getDailyActiveUsers();
   }
 
+  @UseGuards(SuperAdminGuard)
+  @Get('stats/dau/history')
+  getDauHistory() {
+    return this.adminService.getDauHistory();
+  }
+
   // ── Projects ──
 
   @UseGuards(ReviewerGuard)

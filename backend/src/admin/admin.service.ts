@@ -42,6 +42,13 @@ export class AdminService {
   private dauCache: { count: number; timestamp: number } | null = null;
   private readonly DAU_CACHE_TTL = 5 * 60 * 1000;
 
+  // DAU history: cache of finalised per-day counts (YYYY-MM-DD → count).
+  // Entries are only written for dates that are fully in the past (UTC),
+  // so they never need invalidation.
+  private readonly dauHistoryCache = new Map<string, number>();
+  private dauHistoryInflight: Promise<void> | null = null;
+  private static readonly DAU_HISTORY_START = '2026-04-03';
+
   constructor(
     private readonly configService: ConfigService,
     @InjectRepository(User) private readonly userRepo: Repository<User>,
@@ -909,6 +916,138 @@ export class AdminService {
 
     this.dauCache = { count: activeCount, timestamp: Date.now() };
     return { count: activeCount };
+  }
+
+  /**
+   * Historical DAU per UTC day, plus the rolling-24h "today" value.
+   *
+   * Each past day's count is the number of distinct users whose linked beest
+   * Hackatime projects produced at least one span with a start in that day's
+   * UTC window. Finalised days (anything before today UTC) are memoised in
+   * `dauHistoryCache`, so a typical request only fetches spans for dates not
+   * yet cached.
+   */
+  async getDauHistory(): Promise<{
+    history: { date: string; count: number }[];
+    today: { count: number; timestamp: number };
+  }> {
+    const todayUtc = AdminService.ymdUtc(new Date());
+    const allDates = AdminService.enumerateDaysUtc(AdminService.DAU_HISTORY_START, todayUtc);
+    const pastDates = allDates.slice(0, -1); // exclude today — it's the rolling 24h
+
+    if (this.hackatimeAdminKey && pastDates.some((d) => !this.dauHistoryCache.has(d))) {
+      // Collapse concurrent callers onto a single backfill.
+      if (!this.dauHistoryInflight) {
+        this.dauHistoryInflight = this.backfillDauHistory(pastDates).finally(() => {
+          this.dauHistoryInflight = null;
+        });
+      }
+      await this.dauHistoryInflight;
+    }
+
+    const history = pastDates.map((date) => ({
+      date,
+      count: this.dauHistoryCache.get(date) ?? 0,
+    }));
+
+    const { count: todayCount } = await this.getDailyActiveUsers();
+    return { history, today: { count: todayCount, timestamp: Date.now() } };
+  }
+
+  private async backfillDauHistory(dates: string[]): Promise<void> {
+    const missing = dates.filter((d) => !this.dauHistoryCache.has(d));
+    if (missing.length === 0) return;
+
+    // Same filter as getDailyActiveUsers: users with a linked Hackatime ID
+    // and at least one project linked to a Hackatime project name.
+    const linkedProjects = await this.projectRepo
+      .createQueryBuilder('p')
+      .innerJoinAndSelect('p.user', 'u')
+      .where('u.hackatime_user_id IS NOT NULL')
+      .andWhere('p.hackatime_project_name IS NOT NULL')
+      .select(['p.id', 'p.hackatimeProjectName', 'u.id', 'u.hackatimeUserId'])
+      .getMany();
+
+    const perUser = new Map<string, { hackatimeUserId: string; linkedNames: Set<string> }>();
+    for (const p of linkedProjects) {
+      if (!p.user?.hackatimeUserId) continue;
+      if (!p.hackatimeProjectName || p.hackatimeProjectName.length === 0) continue;
+      let entry = perUser.get(p.user.id);
+      if (!entry) {
+        entry = { hackatimeUserId: p.user.hackatimeUserId, linkedNames: new Set() };
+        perUser.set(p.user.id, entry);
+      }
+      for (const n of p.hackatimeProjectName) entry.linkedNames.add(n);
+    }
+
+    const startDate = missing[0];
+    const endDate = missing[missing.length - 1];
+    // end_date on Hackatime is inclusive of the day — pad by one so the last
+    // missing day is fully covered even with timezone edge cases.
+    const endDatePadded = AdminService.ymdUtc(
+      new Date(Date.parse(endDate + 'T00:00:00Z') + 86400_000),
+    );
+
+    // Per-day sets of active user IDs.
+    const activeByDay = new Map<string, Set<string>>();
+    for (const d of missing) activeByDay.set(d, new Set());
+
+    const users = Array.from(perUser.entries());
+    const batchSize = 10;
+    for (let i = 0; i < users.length; i += batchSize) {
+      const batch = users.slice(i, i + batchSize);
+      await Promise.allSettled(
+        batch.map(async ([userId, user]) => {
+          // One request per linked project name — the spans endpoint filters
+          // by a single project at a time.
+          const projectNames = Array.from(user.linkedNames);
+          const responses = await Promise.allSettled(
+            projectNames.map((name) =>
+              this.hackatimeGet(
+                `/api/v1/users/${encodeURIComponent(user.hackatimeUserId)}/heartbeats/spans` +
+                  `?start_date=${startDate}&end_date=${endDatePadded}` +
+                  `&project=${encodeURIComponent(name)}`,
+              ).then(async (r) => (r.ok ? ((await r.json()) as { spans?: { start_time?: number }[] }) : null)),
+            ),
+          );
+          for (const r of responses) {
+            if (r.status !== 'fulfilled' || !r.value?.spans) continue;
+            for (const span of r.value.spans) {
+              const t = span.start_time;
+              if (typeof t !== 'number' || !Number.isFinite(t) || t <= 0) continue;
+              const ms = t > 1e12 ? t : t * 1000;
+              const day = AdminService.ymdUtc(new Date(ms));
+              const set = activeByDay.get(day);
+              if (set) set.add(userId);
+            }
+          }
+        }),
+      );
+    }
+
+    const todayUtc = AdminService.ymdUtc(new Date());
+    for (const [day, set] of activeByDay) {
+      // Only persist finalised days — today's window is still open.
+      if (day < todayUtc) this.dauHistoryCache.set(day, set.size);
+    }
+  }
+
+  private static ymdUtc(d: Date): string {
+    const y = d.getUTCFullYear();
+    const m = String(d.getUTCMonth() + 1).padStart(2, '0');
+    const day = String(d.getUTCDate()).padStart(2, '0');
+    return `${y}-${m}-${day}`;
+  }
+
+  private static enumerateDaysUtc(startYmd: string, endYmd: string): string[] {
+    const out: string[] = [];
+    let cursor = Date.parse(startYmd + 'T00:00:00Z');
+    const end = Date.parse(endYmd + 'T00:00:00Z');
+    while (cursor <= end) {
+      out.push(AdminService.ymdUtc(new Date(cursor)));
+      cursor += 86400_000;
+    }
+    return out;
   }
 
   // ── News CRUD ──
