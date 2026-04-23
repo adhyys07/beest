@@ -1470,7 +1470,7 @@
             <div class="shop-header">
               <div>
                 <h2 class="section-title">Earn Prizes</h2>
-                <p class="section-subtitle">Build projects, earn hours, unlock rewards.</p>
+                <p class="section-subtitle">Build projects, earn hours, unlock rewards.<br><b>Hours spent in the shop detract from qualifying hours!</b></p>
               </div>
               <div class="pipes-box">
                 <img src="/images/pipes.png" alt="Pipes" class="pipe-img" />
