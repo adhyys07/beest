@@ -4546,9 +4546,15 @@
 
   .explore-grid {
     display: grid;
-    grid-template-columns: repeat(auto-fill, minmax(200px, 240px));
+    grid-template-columns: repeat(4, minmax(0, 1fr));
     gap: 20px;
     opacity: 0.35;
+  }
+
+  @media (max-width: 1100px) {
+    .explore-grid {
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+    }
   }
 
   .explore-card-skeleton {
