@@ -15,9 +15,11 @@
 	}
 
 	$effect(() => {
-		checkImpersonating();
-		if (localStorage.getItem('customCursor') !== 'off') {
-			document.documentElement.classList.add('custom-cursor');
+		if (typeof document !== 'undefined') {
+			checkImpersonating();
+			if (typeof localStorage !== 'undefined' && localStorage.getItem('customCursor') !== 'off') {
+				document.documentElement.classList.add('custom-cursor');
+			}
 		}
 	});
 </script>

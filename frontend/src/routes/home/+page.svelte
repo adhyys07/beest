@@ -148,7 +148,7 @@
     hasScreenshots &&
     !submitting
   );
-  let projectCols = $derived(Math.min(2, Math.ceil(Math.sqrt(projects.length))));
+  let projectCols = $derived(Math.max(1, Math.min(2, Math.ceil(Math.sqrt(projects.length)))));
 
   // Review checklist
   let reviewProject = $state<any>(null);
@@ -720,7 +720,7 @@
   const faqItems = [
     { q: 'What is Beest?', a: 'Beest is a Hack Club hackathon/event in the Netherlands! Participants qualify by building any project and documenting the process, and those who qualify fly to the Netherlands to build their own beests (mechanical animals!). The event is themed around Strandbeests, a kinetic sculpture developed in the netherlands by Theo Jansen. Participants will have the opportunity to go to a strandbeest exhibit!' },
     { q: 'Who can participate?', a: 'Any teens 13-19 or in high school can participate. We can also provide flight stipends for international students to get to the event.' },
-    { q: 'How much does it cost?', a: 'Beest is completely free to participate in! All costs for the event are covered, including food, accomodation, day-off travel and merchandise. Additionally participants can earn stipends for visa application fees and flight costs.' },
+    { q: 'How much does it cost?', a: 'Beest is completely free to participate in! All costs for the event are covered, including food, accommodation, day-off travel and merchandise. Additionally participants can earn stipends for visa application fees and flight costs.' },
     { q: 'Where and when does Beest take place?', a: '[TBD]' },
     { q: 'How will the event run?', a: 'Participants are invited to arrive on July 7th to watch the exhibition of the Beest - then in teams of three they will make walking mechanisms over a week, before exhibiting them on Scheveningen beach.' },
     { q: 'How do I qualify?', a: "Build an open source coding or hardware project! Anything you can dream up is possible, just make the project you want to exist. Please don't AI generate the project, instead focus on making something fun, silly, useful to you or a project that forces you to learn something new. 40 hours of tracked work will automatically qualify you, and working for additional hours will contribute $8/hr toward your flight cost or visa application fees." },
@@ -857,6 +857,12 @@
   }
 
   onMount(() => {
+    if (customCursorEnabled) {
+      document.documentElement.classList.add('custom-cursor');
+    } else {
+      document.documentElement.classList.remove('custom-cursor');
+    }
+
     let loaded = 0;
     for (const src of ['/images/tile.webp', '/images/tile2.webp', '/images/tile3.webp']) {
       const img = new Image();
@@ -2545,7 +2551,7 @@
     flex-direction: column;
     width: 100%;
     position: relative;
-    overflow-x: clip;
+    overflow-x: hidden;
   }
 
   .create-project-form::after {
@@ -5270,7 +5276,7 @@
     min-height: 100%;
     padding: 2rem 3rem;
     position: relative;
-    overflow-x: clip;
+    overflow-x: hidden;
   }
 
   .faq-page::after {

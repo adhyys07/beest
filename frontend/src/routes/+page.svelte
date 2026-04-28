@@ -1135,6 +1135,7 @@
 
   .rsvp-box {
     position: relative;
+    z-index: 1;
     flex: 0 0 380px;
     box-sizing: border-box;
     min-height: 420px;
@@ -1883,6 +1884,19 @@
   }
 
   @media (max-width: 900px) {
+    .sticker-cta::after,
+    .what-is-this::after,
+    .info-bg::after,
+    .sticker-bg::after,
+    .carousel-section::after,
+    .hackclub-section::after,
+    .bottom-rsvp::after,
+    .rock-strata::after,
+    .site-footer::after {
+      mix-blend-mode: normal;
+      opacity: 0.05;
+    }
+
     .hero-mobile {
       display: block;
     }
