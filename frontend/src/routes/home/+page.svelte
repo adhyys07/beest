@@ -1880,119 +1880,6 @@
     </section>
     {/if}
 
-    <!-- Project detail overlay -->
-    {#if detailProject}
-    <div class="detail-overlay" role="dialog" aria-modal="true">
-      <div class="detail-backdrop" onclick={closeProjectDetail} onkeydown={(e) => e.key === 'Escape' && closeProjectDetail()} role="button" tabindex="-1"></div>
-      <div class="detail-panel">
-        <button class="detail-close" onclick={closeProjectDetail} type="button" aria-label="Close">&times;</button>
-
-        <!-- Image gallery -->
-        <div class="detail-gallery">
-          {#if detailProject.screenshot1Url || detailProject.screenshot2Url}
-            {@const screenshots = [detailProject.screenshot1Url, detailProject.screenshot2Url].filter(Boolean) as string[]}
-            <div class="detail-img-wrap">
-              <img
-                class="detail-img"
-                src={screenshots[detailActiveImg] ?? screenshots[0]}
-                alt="{detailProject.name} screenshot {detailActiveImg + 1}"
-              />
-              {#if screenshots.length > 1}
-                <button class="detail-arrow detail-arrow-left" onclick={() => detailActiveImg = detailActiveImg === 0 ? screenshots.length - 1 : detailActiveImg - 1} type="button" aria-label="Previous screenshot">&#8249;</button>
-                <button class="detail-arrow detail-arrow-right" onclick={() => detailActiveImg = (detailActiveImg + 1) % screenshots.length} type="button" aria-label="Next screenshot">&#8250;</button>
-                <div class="detail-img-dots">
-                  {#each screenshots as _, i}
-                    <span class="detail-dot" class:detail-dot-active={detailActiveImg === i}></span>
-                  {/each}
-                </div>
-              {/if}
-            </div>
-          {:else}
-            <div class="detail-img-wrap detail-no-img">
-              <span>No screenshots</span>
-            </div>
-          {/if}
-        </div>
-
-        <!-- Project info -->
-        <div class="detail-info">
-          <div class="detail-header">
-            <h2 class="detail-name">{detailProject.name}</h2>
-            <span class="detail-type">{detailProject.projectType}</span>
-          </div>
-          <p class="detail-builder">by {detailProject.builderName}</p>
-          {#if detailProject.hours > 0}
-            <p class="detail-hours">{detailProject.hours.toFixed(1)} hours</p>
-          {/if}
-          <p class="detail-desc">{detailProject.description}</p>
-
-          <!-- Chunky action buttons -->
-          <div class="detail-actions">
-            {#if detailProject.demoUrl}
-              <a href={detailProject.demoUrl} target="_blank" rel="noopener noreferrer" class="detail-btn detail-btn-demo">
-                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><polygon points="10 8 16 12 10 16 10 8"/></svg>
-                View Demo
-              </a>
-            {/if}
-            {#if detailProject.codeUrl}
-              <a href={detailProject.codeUrl} target="_blank" rel="noopener noreferrer" class="detail-btn detail-btn-code">
-                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="16 18 22 12 16 6"/><polyline points="8 6 2 12 8 18"/></svg>
-                Source Code
-              </a>
-            {/if}
-          </div>
-        </div>
-
-        <!-- Comments -->
-        <div class="detail-comments">
-          <h3 class="detail-comments-title">Comments</h3>
-
-          <div class="detail-comment-form">
-            <textarea
-              class="detail-comment-input"
-              bind:value={detailCommentText}
-              placeholder="Leave a comment..."
-              maxlength="500"
-              rows="3"
-            ></textarea>
-            <div class="detail-comment-form-footer">
-              <span class="detail-comment-charcount">{detailCommentText.length}/500</span>
-              <button
-                class="detail-comment-submit"
-                onclick={submitComment}
-                disabled={detailCommentSubmitting || detailCommentText.trim().length === 0}
-                type="button"
-              >
-                {detailCommentSubmitting ? 'Posting...' : 'Post'}
-              </button>
-            </div>
-          </div>
-
-          {#if detailCommentsLoading}
-            <p class="detail-comments-loading">Loading comments...</p>
-          {:else if detailComments.length === 0}
-            <p class="detail-comments-empty">No comments yet. Be the first!</p>
-          {:else}
-            <div class="detail-comments-list">
-              {#each detailComments as comment}
-                <div class="detail-comment">
-                  <div class="detail-comment-header">
-                    <span class="detail-comment-author">{comment.authorName}</span>
-                    <span class="detail-comment-date">{new Date(comment.createdAt).toLocaleDateString()}</span>
-                    {#if comment.authorId === data.user.uid || detailProject.ownerId === data.user.uid || data.role}
-                      <button class="detail-comment-delete" onclick={() => deleteComment(comment.id)} type="button" title="Delete comment">&times;</button>
-                    {/if}
-                  </div>
-                  <p class="detail-comment-body">{comment.body}</p>
-                </div>
-              {/each}
-            </div>
-          {/if}
-        </div>
-      </div>
-    </div>
-    {/if}
-
     {#if activeSection === 'leaderboard'}
     <section class="section section-leaderboard">
       <div class="section-inner">
@@ -2212,6 +2099,119 @@
     {/if}
 
   </main>
+
+  <!-- Project detail overlay (rendered outside <main> so position:fixed is relative to viewport, not the filtered main element) -->
+  {#if detailProject}
+  <div class="detail-overlay" role="dialog" aria-modal="true">
+    <div class="detail-backdrop" onclick={closeProjectDetail} onkeydown={(e) => e.key === 'Escape' && closeProjectDetail()} role="button" tabindex="-1"></div>
+    <div class="detail-panel">
+      <button class="detail-close" onclick={closeProjectDetail} type="button" aria-label="Close">&times;</button>
+
+      <!-- Image gallery -->
+      <div class="detail-gallery">
+        {#if detailProject.screenshot1Url || detailProject.screenshot2Url}
+          {@const screenshots = [detailProject.screenshot1Url, detailProject.screenshot2Url].filter(Boolean) as string[]}
+          <div class="detail-img-wrap">
+            <img
+              class="detail-img"
+              src={screenshots[detailActiveImg] ?? screenshots[0]}
+              alt="{detailProject.name} screenshot {detailActiveImg + 1}"
+            />
+            {#if screenshots.length > 1}
+              <button class="detail-arrow detail-arrow-left" onclick={() => detailActiveImg = detailActiveImg === 0 ? screenshots.length - 1 : detailActiveImg - 1} type="button" aria-label="Previous screenshot">&#8249;</button>
+              <button class="detail-arrow detail-arrow-right" onclick={() => detailActiveImg = (detailActiveImg + 1) % screenshots.length} type="button" aria-label="Next screenshot">&#8250;</button>
+              <div class="detail-img-dots">
+                {#each screenshots as _, i}
+                  <span class="detail-dot" class:detail-dot-active={detailActiveImg === i}></span>
+                {/each}
+              </div>
+            {/if}
+          </div>
+        {:else}
+          <div class="detail-img-wrap detail-no-img">
+            <span>No screenshots</span>
+          </div>
+        {/if}
+      </div>
+
+      <!-- Project info -->
+      <div class="detail-info">
+        <div class="detail-header">
+          <h2 class="detail-name">{detailProject.name}</h2>
+          <span class="detail-type">{detailProject.projectType}</span>
+        </div>
+        <p class="detail-builder">by {detailProject.builderName}</p>
+        {#if detailProject.hours > 0}
+          <p class="detail-hours">{detailProject.hours.toFixed(1)} hours</p>
+        {/if}
+        <p class="detail-desc">{detailProject.description}</p>
+
+        <!-- Chunky action buttons -->
+        <div class="detail-actions">
+          {#if detailProject.demoUrl}
+            <a href={detailProject.demoUrl} target="_blank" rel="noopener noreferrer" class="detail-btn detail-btn-demo">
+              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><polygon points="10 8 16 12 10 16 10 8"/></svg>
+              View Demo
+            </a>
+          {/if}
+          {#if detailProject.codeUrl}
+            <a href={detailProject.codeUrl} target="_blank" rel="noopener noreferrer" class="detail-btn detail-btn-code">
+              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="16 18 22 12 16 6"/><polyline points="8 6 2 12 8 18"/></svg>
+              Source Code
+            </a>
+          {/if}
+        </div>
+      </div>
+
+      <!-- Comments -->
+      <div class="detail-comments">
+        <h3 class="detail-comments-title">Comments</h3>
+
+        <div class="detail-comment-form">
+          <textarea
+            class="detail-comment-input"
+            bind:value={detailCommentText}
+            placeholder="Leave a comment..."
+            maxlength="500"
+            rows="3"
+          ></textarea>
+          <div class="detail-comment-form-footer">
+            <span class="detail-comment-charcount">{detailCommentText.length}/500</span>
+            <button
+              class="detail-comment-submit"
+              onclick={submitComment}
+              disabled={detailCommentSubmitting || detailCommentText.trim().length === 0}
+              type="button"
+            >
+              {detailCommentSubmitting ? 'Posting...' : 'Post'}
+            </button>
+          </div>
+        </div>
+
+        {#if detailCommentsLoading}
+          <p class="detail-comments-loading">Loading comments...</p>
+        {:else if detailComments.length === 0}
+          <p class="detail-comments-empty">No comments yet. Be the first!</p>
+        {:else}
+          <div class="detail-comments-list">
+            {#each detailComments as comment}
+              <div class="detail-comment">
+                <div class="detail-comment-header">
+                  <span class="detail-comment-author">{comment.authorName}</span>
+                  <span class="detail-comment-date">{new Date(comment.createdAt).toLocaleDateString()}</span>
+                  {#if comment.authorId === data.user.uid || detailProject.ownerId === data.user.uid || data.role}
+                    <button class="detail-comment-delete" onclick={() => deleteComment(comment.id)} type="button" title="Delete comment">&times;</button>
+                  {/if}
+                </div>
+                <p class="detail-comment-body">{comment.body}</p>
+              </div>
+            {/each}
+          </div>
+        {/if}
+      </div>
+    </div>
+  </div>
+  {/if}
 </div>
 
 <style>
