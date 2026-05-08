@@ -56,7 +56,10 @@ export class ProjectsController {
     let displayHours = 0;
     for (const p of projects) {
       const names = p.hackatimeProjectName ?? [];
-      const status = p.status ?? 'unshipped';
+      // Bucket fraud_pending under 'unreviewed' for the user's progress bar —
+      // from the user's perspective these hours are still in review.
+      const rawStatus = p.status ?? 'unshipped';
+      const status = rawStatus === 'fraud_pending' ? 'unreviewed' : rawStatus;
 
       let currentHours = 0;
       for (const name of names) {
