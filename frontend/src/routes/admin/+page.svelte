@@ -755,6 +755,7 @@
 		updatedAt: string;
 		userName: string;
 		userSlackId: string | null;
+		userEmail: string | null;
 		pendingSince: number | null;
 	}
 	let fulfillmentOrders: AdminOrder[] = $state([]);
@@ -1204,7 +1205,7 @@
 							{#each filteredFulfillment as order}
 								<tr class:fulfilled={order.status === 'fulfilled'}>
 									<td>{order.itemName}</td>
-									<td>{order.userName}{order.userSlackId ? ` (${order.userSlackId})` : ''}</td>
+									<td>{order.userName}{order.userEmail ? ` (${order.userEmail})` : ''}</td>
 									<td>{order.quantity}</td>
 									<td>{order.pipesSpent}</td>
 									<td><span class="status-badge" class:status-pending={order.status === 'pending'} class:status-fulfilled={order.status === 'fulfilled'}>{order.status}</span></td>

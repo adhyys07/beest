@@ -354,6 +354,7 @@ export class ShopService {
         'user.name',
         'user.nickname',
         'user.slackId',
+        'user.email',
       ]);
 
     if (options?.shopItemId) {
@@ -386,6 +387,7 @@ export class ShopService {
       updatedAt: o.updatedAt,
       userName: o.user?.nickname || o.user?.name || 'Unknown',
       userSlackId: o.user?.slackId || null,
+      userEmail: o.user?.email || null,
       pendingSince: o.status === 'pending'
         ? Math.floor((Date.now() - new Date(o.createdAt).getTime()) / (1000 * 60 * 60))
         : null,
