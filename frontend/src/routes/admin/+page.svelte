@@ -1501,10 +1501,10 @@
 									{#if hackatimeLoading}
 										<span class="ht-loading">Loading Hackatime data...</span>
 									{:else if hackatimeData}
+										{@const rawTrust = hackatimeData.trustLevel?.toLowerCase() ?? ''}
+										{@const displayTrust = !isSuperAdmin && rawTrust === 'yellow' ? 'blue' : rawTrust}
 										<div class="ht-detail">
 											<div class="ht-header">
-												{@const rawTrust = hackatimeData.trustLevel?.toLowerCase() ?? ''}
-												{@const displayTrust = !isSuperAdmin && rawTrust === 'yellow' ? 'blue' : rawTrust}
 												<span class="ht-trust">Trust Level: <strong class="trust-{displayTrust || 'unknown'}">{{ blue: 'standard', yellow: 'warned', red: 'banned' }[displayTrust] ?? hackatimeData.trustLevel ?? 'unknown'}</strong></span>
 												<span class="ht-total">{hackatimeData.totalHours}h total</span>
 												{#if hackatimeData.earliestHeartbeat}
