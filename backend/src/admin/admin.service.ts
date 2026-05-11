@@ -1384,4 +1384,75 @@ export class AdminService {
       items.map((i) => this.shopRepo.update(i.id, { sortOrder: i.sortOrder })),
     );
   }
+
+  /**
+   * Super-admin-only order detail for fulfillment: returns the buyer's address
+   * (fetched live from HCA — never persisted in beest) plus their approved
+   * projects so fulfillment staff can verify what to ship.
+   */
+  async getOrderDetailForFulfillment(orderId: string): Promise<{
+    address: {
+      streetAddress: string | null;
+      locality: string | null;
+      region: string | null;
+      postalCode: string | null;
+      country: string | null;
+    } | null;
+    addressMissing: boolean;
+    projects: {
+      id: string;
+      name: string;
+      projectType: string | null;
+      hours: number | null;
+      approvedAt: string;
+    }[];
+  }> {
+    const order = await this.orderRepo.findOne({
+      where: { id: orderId },
+      relations: ['user'],
+    });
+    if (!order) throw new NotFoundException('Order not found');
+
+    const user = order.user;
+
+    const [identity, projects] = await Promise.all([
+      user?.hcaSub ? this.hcaService.getIdentity(user.hcaSub) : Promise.resolve(null),
+      this.projectRepo
+        .createQueryBuilder('project')
+        .where('project.userId = :uid', { uid: order.userId })
+        .andWhere('project.status = :status', { status: 'approved' })
+        .select([
+          'project.id',
+          'project.name',
+          'project.projectType',
+          'project.overrideHours',
+          'project.updatedAt',
+        ])
+        .orderBy('project.updatedAt', 'DESC')
+        .getMany(),
+    ]);
+
+    const addr = identity?.address ?? null;
+    const address = addr
+      ? {
+          streetAddress: addr.street_address ?? null,
+          locality: addr.locality ?? null,
+          region: addr.region ?? null,
+          postalCode: addr.postal_code ?? null,
+          country: addr.country ?? null,
+        }
+      : null;
+
+    return {
+      address,
+      addressMissing: !address,
+      projects: projects.map((p) => ({
+        id: p.id,
+        name: p.name,
+        projectType: p.projectType ?? null,
+        hours: p.overrideHours ?? null,
+        approvedAt: p.updatedAt.toISOString(),
+      })),
+    };
+  }
 }

@@ -191,15 +191,15 @@ export class AdminController {
     }
 
     // Reviewer must add their own reasoning beyond the auto-generated template
-    // (~180 chars) — require at least 230 chars on overrideJustification for any
+    // (~180 chars) — require at least 350 chars on overrideJustification for any
     // approve/changes_needed action so reviews aren't rubber-stamped. Ban goes
     // through banAndRejectProject below and is gated by SuperAdmin separately.
     if (body.status === 'approved' || body.status === 'changes_needed') {
       const justification = (body.overrideJustification ?? '').trim();
-      const JUSTIFICATION_MIN = 230;
+      const JUSTIFICATION_MIN = 350;
       if (justification.length < JUSTIFICATION_MIN) {
         throw new BadRequestException(
-          `Override Justification must be at least ${JUSTIFICATION_MIN} characters — please add at least 50 characters of your own reasoning beyond the auto-generated template.`,
+          `Override Justification must be at least ${JUSTIFICATION_MIN} characters — please add at least 170 characters of your own reasoning beyond the auto-generated template.`,
         );
       }
     }
@@ -398,6 +398,12 @@ export class AdminController {
       status: query.status,
       sortBy: query.sortBy,
     });
+  }
+
+  @UseGuards(SuperAdminGuard)
+  @Get('orders/:id/detail')
+  async getOrderDetail(@Param('id', ParseUUIDPipe) id: string) {
+    return this.adminService.getOrderDetailForFulfillment(id);
   }
 
   @UseGuards(SuperAdminGuard)
