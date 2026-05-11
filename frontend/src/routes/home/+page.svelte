@@ -4960,7 +4960,7 @@
   }
 
   .shop-grid-featured {
-    grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+    grid-template-columns: repeat(auto-fit, minmax(220px, calc((100% - 40px) / 3)));
   }
 
   .shop-card-featured {
