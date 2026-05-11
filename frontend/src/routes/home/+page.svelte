@@ -91,6 +91,7 @@
   let shopLoaded = $state(false);
   let selectedShopItem = $state<ShopItemType | null>(null);
   let shopQuantity = $state(1);
+  let shopQuantityText = $state('1');
   let userPipes = $state(0);
   let purchaseLoading = $state(false);
   let purchaseError = $state('');
@@ -817,6 +818,31 @@
   function openShopItem(item: ShopItemType) {
     selectedShopItem = item;
     shopQuantity = 1;
+    shopQuantityText = '1';
+  }
+
+  function setShopQuantity(raw: string) {
+    const digits = raw.replace(/\D/g, '');
+    shopQuantityText = digits;
+    if (digits === '') return;
+    let n = parseInt(digits, 10);
+    if (!Number.isFinite(n) || n < 1) n = 1;
+    const max = selectedShopItem?.stock ?? null;
+    if (max !== null && n > max) {
+      n = max;
+      shopQuantityText = String(n);
+    }
+    shopQuantity = n;
+  }
+
+  function commitShopQuantity() {
+    const n = parseInt(shopQuantityText, 10);
+    if (!Number.isFinite(n) || n < 1) {
+      shopQuantity = 1;
+      shopQuantityText = '1';
+    } else {
+      shopQuantityText = String(shopQuantity);
+    }
   }
 
   function closeShopItem() {
@@ -2027,21 +2053,19 @@
             <div class="shop-modal-qty">
               <span class="shop-modal-qty-label">Quantity</span>
               <div class="shop-modal-qty-controls">
-                <button
-                  class="qty-btn"
-                  type="button"
-                  onclick={() => { if (shopQuantity > 1) shopQuantity--; }}
-                  disabled={shopQuantity <= 1}
-                >-</button>
-                <span class="qty-value">{shopQuantity}</span>
-                <button
-                  class="qty-btn"
-                  type="button"
-                  onclick={() => {
-                    if (selectedShopItem!.stock === null || shopQuantity < selectedShopItem!.stock) shopQuantity++;
+                <input
+                  class="qty-input"
+                  type="text"
+                  inputmode="numeric"
+                  pattern="[0-9]*"
+                  value={shopQuantityText}
+                  oninput={(e) => {
+                    setShopQuantity(e.currentTarget.value);
+                    e.currentTarget.value = shopQuantityText;
                   }}
-                  disabled={selectedShopItem.stock !== null && shopQuantity >= selectedShopItem.stock}
-                >+</button>
+                  onblur={commitShopQuantity}
+                  aria-label="Quantity"
+                />
               </div>
             </div>
 
@@ -5235,30 +5259,8 @@
     border: 3px solid #3a3832;
   }
 
-  .qty-btn {
-    width: 40px;
-    height: 40px;
-    background: #8a7f6f;
-    border: none;
-    color: #e6f4fe;
-    font-family: "Stone Breaker", "Courier New", monospace;
-    font-size: 22px;
-    cursor: pointer;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    transition: background 120ms ease;
-  }
-
-  .qty-btn:hover:not(:disabled) { background: #6c6659; }
-  .qty-btn:disabled { opacity: 0.4; cursor: not-allowed; }
-
-  .qty-btn:active:not(:disabled) {
-    transform: scale(0.92);
-  }
-
-  .qty-value {
-    width: 48px;
+  .qty-input {
+    width: 96px;
     text-align: center;
     font-family: "Stone Breaker", "Courier New", monospace;
     font-size: 20px;
@@ -5266,8 +5268,14 @@
     background: #e6e0d4;
     height: 40px;
     line-height: 40px;
-    border-left: 2px solid #3a3832;
-    border-right: 2px solid #3a3832;
+    border: none;
+    padding: 0 8px;
+    outline: none;
+    -moz-appearance: textfield;
+  }
+
+  .qty-input:focus {
+    background: #f1ecdf;
   }
 
   .shop-modal-total {

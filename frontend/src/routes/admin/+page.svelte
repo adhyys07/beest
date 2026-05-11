@@ -121,7 +121,7 @@
 
 	// Reviewer must add their own reasoning beyond the auto-generated template
 	// (~180 chars) before approving or rejecting. Server enforces ≥230 chars too.
-	const JUSTIFICATION_MIN = 230;
+	const JUSTIFICATION_MIN = 350;
 	let justificationOk = $derived(overrideJustification.trim().length >= JUSTIFICATION_MIN);
 	let justificationCharsRemaining = $derived(
 		Math.max(0, JUSTIFICATION_MIN - overrideJustification.trim().length),
@@ -766,6 +766,50 @@
 	let fulfillmentMsg = $state<Record<string, string>>({});
 	let fulfillmentActionLoading = $state('');
 
+	type OrderDetail = {
+		address: {
+			streetAddress: string | null;
+			locality: string | null;
+			region: string | null;
+			postalCode: string | null;
+			country: string | null;
+		} | null;
+		addressMissing: boolean;
+		projects: { id: string; name: string; projectType: string | null; hours: number | null; approvedAt: string }[];
+	};
+	let expandedOrderId = $state<string | null>(null);
+	let orderDetails = $state<Record<string, OrderDetail | 'loading' | 'error'>>({});
+	let copiedKey = $state('');
+
+	async function toggleOrderRow(orderId: string) {
+		if (expandedOrderId === orderId) {
+			expandedOrderId = null;
+			return;
+		}
+		expandedOrderId = orderId;
+		if (orderDetails[orderId] && orderDetails[orderId] !== 'error') return;
+		orderDetails[orderId] = 'loading';
+		try {
+			const res = await fetch(`/api/admin/orders/${orderId}/detail`);
+			if (!res.ok) {
+				orderDetails[orderId] = 'error';
+				return;
+			}
+			orderDetails[orderId] = await res.json();
+		} catch {
+			orderDetails[orderId] = 'error';
+		}
+	}
+
+	async function copyAddressLine(key: string, value: string | null | undefined) {
+		if (!value) return;
+		try {
+			await navigator.clipboard.writeText(value);
+			copiedKey = key;
+			setTimeout(() => { if (copiedKey === key) copiedKey = ''; }, 1200);
+		} catch { /* clipboard blocked */ }
+	}
+
 	let fulfillmentItemOptions = $derived([...new Set(fulfillmentOrders.map(o => o.itemName))].sort());
 
 	let filteredFulfillment = $derived.by(() => {
@@ -1203,14 +1247,16 @@
 						</thead>
 						<tbody>
 							{#each filteredFulfillment as order}
-								<tr class:fulfilled={order.status === 'fulfilled'}>
-									<td>{order.itemName}</td>
+								{@const detail = orderDetails[order.id]}
+								{@const isOpen = expandedOrderId === order.id}
+								<tr class:fulfilled={order.status === 'fulfilled'} class:order-row={true} class:order-row-open={isOpen} onclick={() => toggleOrderRow(order.id)} onkeydown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); toggleOrderRow(order.id); } }} tabindex="0" role="button" aria-expanded={isOpen}>
+									<td><span class="order-row-toggle" aria-hidden="true">{isOpen ? '▾' : '▸'}</span> {order.itemName}</td>
 									<td>{order.userName}{order.userEmail ? ` (${order.userEmail})` : ''}</td>
 									<td>{order.quantity}</td>
 									<td>{order.pipesSpent}</td>
 									<td><span class="status-badge" class:status-pending={order.status === 'pending'} class:status-fulfilled={order.status === 'fulfilled'}>{order.status}</span></td>
 									<td>{order.pendingSince !== null ? formatPendingTime(order.pendingSince) : '—'}</td>
-									<td class="fulfillment-actions">
+									<td class="fulfillment-actions" onclick={(e) => e.stopPropagation()}>
 										{#if order.status === 'pending'}
 											<button class="btn btn-sm btn-primary" onclick={() => fulfillOrder(order.id)} disabled={fulfillmentActionLoading === order.id}>
 												{fulfillmentActionLoading === order.id ? '...' : 'Fulfill'}
@@ -1235,6 +1281,80 @@
 										</div>
 									</td>
 								</tr>
+								{#if isOpen}
+									<tr class="order-detail-row">
+										<td colspan="7">
+											{#if detail === 'loading' || detail === undefined}
+												<div class="order-detail-loading">Loading order detail...</div>
+											{:else if detail === 'error'}
+												<div class="order-detail-error">Failed to load order detail. <button class="link-btn" onclick={() => toggleOrderRow(order.id)}>Retry</button></div>
+											{:else}
+												<div class="order-detail">
+													<div class="order-detail-section">
+														<h4 class="order-detail-heading">Shipping address <span class="order-detail-hint">(click any line to copy)</span></h4>
+														{#if detail.addressMissing || !detail.address}
+															<p class="order-detail-empty">No address on file in HCA. Ask the user to set one at auth.hackclub.com/portal/address.</p>
+														{:else}
+															<ul class="address-lines">
+																{#each [
+																	{ key: 'street', label: 'Street', value: detail.address.streetAddress },
+																	{ key: 'locality', label: 'City', value: detail.address.locality },
+																	{ key: 'region', label: 'Region', value: detail.address.region },
+																	{ key: 'postal', label: 'Postal code', value: detail.address.postalCode },
+																	{ key: 'country', label: 'Country', value: detail.address.country }
+																] as line (line.key)}
+																	{#if line.value}
+																		{@const ck = `${order.id}:${line.key}`}
+																		<li>
+																			<button type="button" class="address-line" class:copied={copiedKey === ck} onclick={() => copyAddressLine(ck, line.value)} title="Click to copy">
+																				<span class="address-label">{line.label}</span>
+																				<span class="address-value">{line.value}</span>
+																				<span class="address-copied">{copiedKey === ck ? 'copied!' : 'copy'}</span>
+																			</button>
+																		</li>
+																	{/if}
+																{/each}
+																{#if detail.address.streetAddress || detail.address.locality}
+																	{@const full = [
+																		detail.address.streetAddress,
+																		[detail.address.locality, detail.address.region].filter(Boolean).join(', '),
+																		detail.address.postalCode,
+																		detail.address.country
+																	].filter(Boolean).join('\n')}
+																	{@const ck = `${order.id}:full`}
+																	<li>
+																		<button type="button" class="address-line address-line-full" class:copied={copiedKey === ck} onclick={() => copyAddressLine(ck, full)} title="Copy full address">
+																			<span class="address-label">All</span>
+																			<span class="address-value">Copy full address</span>
+																			<span class="address-copied">{copiedKey === ck ? 'copied!' : 'copy'}</span>
+																		</button>
+																	</li>
+																{/if}
+															</ul>
+														{/if}
+													</div>
+													<div class="order-detail-section">
+														<h4 class="order-detail-heading">Approved projects ({detail.projects.length})</h4>
+														{#if detail.projects.length === 0}
+															<p class="order-detail-empty">No approved projects yet.</p>
+														{:else}
+															<ul class="approved-projects">
+																{#each detail.projects as p (p.id)}
+																	<li>
+																		<span class="approved-project-name">{p.name}</span>
+																		{#if p.projectType}<span class="approved-project-type">{p.projectType}</span>{/if}
+																		{#if p.hours != null}<span class="approved-project-hours">{p.hours}h</span>{/if}
+																		<span class="approved-project-date">{formatDate(p.approvedAt)}</span>
+																	</li>
+																{/each}
+															</ul>
+														{/if}
+													</div>
+												</div>
+											{/if}
+										</td>
+									</tr>
+								{/if}
 							{/each}
 						</tbody>
 					</table>
@@ -3791,4 +3911,83 @@
 	.admin-shell.light .fulfillment-msg-input { background: #fff; border-color: #ccc; color: #1a1a1a; }
 	.admin-shell.light .status-pending { background: rgba(196, 131, 130, 0.15); }
 	.admin-shell.light .status-fulfilled { background: rgba(147, 180, 205, 0.15); }
+
+	.order-row { cursor: pointer; }
+	.order-row-toggle { display: inline-block; width: 1em; color: #93b4cd; }
+	.order-row-open { background: rgba(147, 180, 205, 0.06); }
+
+	.order-detail-row td {
+		padding: 1rem 1.25rem;
+		background: rgba(0,0,0,0.18);
+		border-top: 1px dashed rgba(255,255,255,0.08);
+	}
+	.admin-shell.light .order-detail-row td { background: rgba(0,0,0,0.03); border-top-color: rgba(0,0,0,0.08); }
+
+	.order-detail {
+		display: grid;
+		grid-template-columns: minmax(260px, 1fr) minmax(260px, 1.4fr);
+		gap: 1.5rem;
+	}
+	.order-detail-section { min-width: 0; }
+	.order-detail-heading {
+		margin: 0 0 0.5rem;
+		font-size: 0.85rem;
+		text-transform: uppercase;
+		letter-spacing: 0.05em;
+		color: #93b4cd;
+	}
+	.order-detail-hint { font-weight: 400; text-transform: none; letter-spacing: 0; color: rgba(255,255,255,0.5); font-size: 0.75rem; margin-left: 0.4rem; }
+	.admin-shell.light .order-detail-hint { color: rgba(0,0,0,0.5); }
+	.order-detail-empty { color: rgba(255,255,255,0.6); font-size: 0.85rem; margin: 0; }
+	.admin-shell.light .order-detail-empty { color: rgba(0,0,0,0.55); }
+	.order-detail-loading { color: rgba(255,255,255,0.6); font-size: 0.85rem; }
+	.order-detail-error { color: #c48382; font-size: 0.85rem; }
+
+	.address-lines { list-style: none; padding: 0; margin: 0; display: flex; flex-direction: column; gap: 0.25rem; }
+	.address-line {
+		display: grid;
+		grid-template-columns: 90px 1fr auto;
+		gap: 0.5rem;
+		align-items: center;
+		width: 100%;
+		padding: 0.4rem 0.6rem;
+		background: rgba(0,0,0,0.25);
+		border: 1px solid rgba(255,255,255,0.08);
+		border-radius: 4px;
+		cursor: pointer;
+		color: inherit;
+		font: inherit;
+		text-align: left;
+		transition: background 120ms ease, border-color 120ms ease;
+	}
+	.address-line:hover { background: rgba(147, 180, 205, 0.12); border-color: rgba(147, 180, 205, 0.4); }
+	.address-line.copied { background: rgba(120, 180, 130, 0.18); border-color: rgba(120, 180, 130, 0.6); }
+	.address-line-full { font-style: italic; }
+	.address-label { font-size: 0.75rem; text-transform: uppercase; color: rgba(255,255,255,0.55); letter-spacing: 0.04em; }
+	.admin-shell.light .address-label { color: rgba(0,0,0,0.55); }
+	.address-value { font-family: ui-monospace, "Courier New", monospace; font-size: 0.9rem; word-break: break-word; }
+	.address-copied { font-size: 0.7rem; color: rgba(255,255,255,0.55); text-transform: uppercase; letter-spacing: 0.05em; }
+	.admin-shell.light .address-line { background: #fff; border-color: #ddd; }
+	.admin-shell.light .address-line:hover { background: #eef4fa; border-color: #93b4cd; }
+	.admin-shell.light .address-copied { color: rgba(0,0,0,0.5); }
+
+	.approved-projects { list-style: none; padding: 0; margin: 0; display: flex; flex-direction: column; gap: 0.25rem; }
+	.approved-projects li {
+		display: flex;
+		gap: 0.6rem;
+		align-items: baseline;
+		padding: 0.35rem 0.55rem;
+		background: rgba(0,0,0,0.18);
+		border-radius: 4px;
+		font-size: 0.85rem;
+	}
+	.admin-shell.light .approved-projects li { background: rgba(0,0,0,0.03); }
+	.approved-project-name { font-weight: 600; }
+	.approved-project-type { color: rgba(255,255,255,0.55); font-size: 0.75rem; text-transform: uppercase; letter-spacing: 0.04em; }
+	.admin-shell.light .approved-project-type { color: rgba(0,0,0,0.55); }
+	.approved-project-hours { color: #93b4cd; font-variant-numeric: tabular-nums; }
+	.approved-project-date { margin-left: auto; color: rgba(255,255,255,0.5); font-size: 0.75rem; }
+	.admin-shell.light .approved-project-date { color: rgba(0,0,0,0.55); }
+
+	.link-btn { background: none; border: none; color: #93b4cd; cursor: pointer; padding: 0; font: inherit; text-decoration: underline; }
 </style>
