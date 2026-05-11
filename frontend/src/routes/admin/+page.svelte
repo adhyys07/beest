@@ -358,7 +358,13 @@
 	const totalUsers = $derived(users.length);
 	const totalHackatime = $derived(users.filter(u => u.hackatimeConnected).length);
 
-	let unreviewedHours = $state<{ totalHours: number; projectCount: number } | null>(null);
+	let unreviewedHours = $state<{
+		totalHours: number;
+		projectCount: number;
+		approvalRate: number;
+		decisionCount: number;
+		predictedApprovedHours: number;
+	} | null>(null);
 	let unreviewedHoursLoading = $state(false);
 
 	async function loadUnreviewedHours() {
@@ -1183,6 +1189,35 @@
 									<span class="stat-sub"> ({unreviewedHours.projectCount} project{unreviewedHours.projectCount === 1 ? '' : 's'})</span>
 								{/if}
 							</span>
+						</div>
+						<div class="stat-card" title="Per-decision approval rate across all historical project_reviews. 'changes_needed' and 'ban' both count as not-approved.">
+							<span class="stat-value">
+								{#if unreviewedHours && unreviewedHours.decisionCount > 0}
+									{Math.round(unreviewedHours.approvalRate * 100)}%
+								{:else if unreviewedHoursLoading}
+									…
+								{:else}
+									—
+								{/if}
+							</span>
+							<span class="stat-label">
+								Approval Rate
+								{#if unreviewedHours && unreviewedHours.decisionCount > 0}
+									<span class="stat-sub"> ({unreviewedHours.decisionCount} decision{unreviewedHours.decisionCount === 1 ? '' : 's'})</span>
+								{/if}
+							</span>
+						</div>
+						<div class="stat-card" title="Unreviewed Hours × Approval Rate. Lower-bound estimate — ignores that 'changes_needed' projects often come back and get approved on a later pass.">
+							<span class="stat-value">
+								{#if unreviewedHours && unreviewedHours.decisionCount > 0}
+									{unreviewedHours.predictedApprovedHours.toFixed(1)}
+								{:else if unreviewedHoursLoading}
+									…
+								{:else}
+									—
+								{/if}
+							</span>
+							<span class="stat-label">Predicted Approved</span>
 						</div>
 					{/if}
 				</div>
