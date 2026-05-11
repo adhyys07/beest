@@ -48,7 +48,13 @@ export class AdminService {
   // Hackatime /spans request per (unreviewed project × linked HT name), so
   // back-to-back stats-page loads must not multiply that fan-out.
   private unreviewedHoursCache: {
-    payload: { totalHours: number; projectCount: number };
+    payload: {
+      totalHours: number;
+      projectCount: number;
+      approvalRate: number;
+      decisionCount: number;
+      predictedApprovedHours: number;
+    };
     timestamp: number;
   } | null = null;
   private readonly UNREVIEWED_HOURS_CACHE_TTL = 60 * 1000;
@@ -1025,20 +1031,45 @@ export class AdminService {
 
   /**
    * Sum of new Hackatime hours awaiting review across every project currently
-   * in 'unreviewed' status. For resubmissions the project's previously-approved
-   * `overrideHours` is subtracted, so the number reflects only the work the
-   * reviewer actually has to evaluate (matches the per-project review UI).
+   * in 'unreviewed' status, plus the historical per-decision approval rate and
+   * a naive prediction of how many of those pending hours will end up approved.
    *
-   * Hours come from event-window /spans (not lifetime totals) so pre-event
-   * Hackatime time is excluded, matching what reviewers see.
+   * - Hours: for resubmissions the project's previously-approved `overrideHours`
+   *   is subtracted, and event-window /spans are used (not lifetime totals) so
+   *   pre-event Hackatime time is excluded — matches the per-project review UI.
+   * - Approval rate: across every entry in project_reviews, treats both
+   *   'changes_needed' and 'ban' as not-approved.
+   * - Predicted approved hours: totalHours * approvalRate. This is intentionally
+   *   simple — it ignores the fact that 'changes_needed' projects often come
+   *   back and get approved on a later pass, so it's a lower-bound estimate.
    */
-  async getUnreviewedHours(): Promise<{ totalHours: number; projectCount: number }> {
+  async getUnreviewedHours(): Promise<{
+    totalHours: number;
+    projectCount: number;
+    approvalRate: number;
+    decisionCount: number;
+    predictedApprovedHours: number;
+  }> {
     if (
       this.unreviewedHoursCache &&
       Date.now() - this.unreviewedHoursCache.timestamp < this.UNREVIEWED_HOURS_CACHE_TTL
     ) {
       return this.unreviewedHoursCache.payload;
     }
+
+    // Historical approval rate from project_reviews. Cheap query — single scan
+    // over a small table — so it shares the unreviewed-hours cache TTL.
+    const reviewCounts = await this.reviewRepo
+      .createQueryBuilder('r')
+      .select("COUNT(*) FILTER (WHERE r.status = 'approved')::int", 'approved')
+      .addSelect("COUNT(*) FILTER (WHERE r.status = 'changes_needed')::int", 'changesNeeded')
+      .addSelect("COUNT(*) FILTER (WHERE r.status = 'ban')::int", 'banned')
+      .getRawOne<{ approved: string | number; changesNeeded: string | number; banned: string | number }>();
+    const approved = Number(reviewCounts?.approved ?? 0);
+    const changesNeeded = Number(reviewCounts?.changesNeeded ?? 0);
+    const banned = Number(reviewCounts?.banned ?? 0);
+    const decisionCount = approved + changesNeeded + banned;
+    const approvalRate = decisionCount > 0 ? approved / decisionCount : 0;
 
     const projects = await this.projectRepo.find({
       where: { status: 'unreviewed' },
@@ -1047,7 +1078,13 @@ export class AdminService {
     const projectCount = projects.length;
 
     if (!this.hackatimeAdminKey || projects.length === 0) {
-      const payload = { totalHours: 0, projectCount };
+      const payload = {
+        totalHours: 0,
+        projectCount,
+        approvalRate,
+        decisionCount,
+        predictedApprovedHours: 0,
+      };
       this.unreviewedHoursCache = { payload, timestamp: Date.now() };
       return payload;
     }
@@ -1127,8 +1164,15 @@ export class AdminService {
       totalHours += newHours;
     }
     totalHours = Math.round(totalHours * 10) / 10;
+    const predictedApprovedHours = Math.round(totalHours * approvalRate * 10) / 10;
 
-    const payload = { totalHours, projectCount };
+    const payload = {
+      totalHours,
+      projectCount,
+      approvalRate,
+      decisionCount,
+      predictedApprovedHours,
+    };
     this.unreviewedHoursCache = { payload, timestamp: Date.now() };
     return payload;
   }
