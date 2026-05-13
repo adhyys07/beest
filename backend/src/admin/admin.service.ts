@@ -717,7 +717,11 @@ export class AdminService {
 
     try {
       const params = new URLSearchParams({
-        select: JSON.stringify({filterByFormula: formula}),
+        select: JSON.stringify({
+          filterByFormula: formula,
+          maxRecords: 1,
+          fields: ['Code URL'],
+        }),
       });
       const url = `https://api2.hackclub.com/v0.1/Unified%20YSWS%20Projects%20DB/Approved%20Projects?${params.toString()}`;
       this.logger.log(`Unified check: formula=${formula}`);
