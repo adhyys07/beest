@@ -37,8 +37,6 @@ export class AdminService {
   private readonly logger = new Logger(AdminService.name);
   private readonly hackatimeBaseUrl: string;
   private readonly hackatimeAdminKey: string | undefined;
-  private readonly unifiedApiKey: string | undefined;
-  private readonly unifiedBaseId = 'app3A5kJwYqxMLOgh';
 
   // DAU cache (5-minute TTL)
   private dauCache: { count: number; timestamp: number } | null = null;
@@ -102,7 +100,6 @@ export class AdminService {
     if (!this.hackatimeAdminKey) {
       this.logger.warn('HACKATIME_ADMIN_API_KEY not set — admin Hackatime lookups disabled');
     }
-    this.unifiedApiKey = this.configService.get('UNIFIED_API_KEY');
   }
 
   async listUsers(): Promise<any[]> {
@@ -700,7 +697,7 @@ export class AdminService {
   private async checkUnifiedDuplicate(
     codeUrl: string,
   ): Promise<{ duplicate: boolean; error: boolean }> {
-    if (!this.unifiedApiKey || !codeUrl) {
+    if (!codeUrl) {
       return { duplicate: false, error: true };
     }
 
@@ -720,22 +717,21 @@ export class AdminService {
 
     try {
       const params = new URLSearchParams({
-        filterByFormula: formula,
-        maxRecords: '1',
-        'fields[]': 'Code URL',
+        select: JSON.stringify({
+          filterByFormula: formula,
+          maxRecords: 1,
+          fields: ['Code URL'],
+        }),
       });
-      const url = `https://api.airtable.com/v0/${this.unifiedBaseId}/Approved%20Projects?${params}`;
+      const url = `https://api2.hackclub.com/v0.1/Unified%20YSWS%20Projects%20DB/Approved%20Projects?${params.toString()}`;
       this.logger.log(`Unified check: formula=${formula}`);
-      const res = await fetchWithTimeout(url, {
-        headers: { Authorization: `Bearer ${this.unifiedApiKey}` },
-      });
+      const res = await fetchWithTimeout(url);
       if (!res.ok) {
         const body = await res.text();
         this.logger.warn(`Unified check failed (${res.status}): ${body}`);
         return { duplicate: false, error: true };
       }
-      const data = await res.json();
-      const records: any[] = data?.records ?? [];
+      const records: any[] = await res.json() ?? [];
       this.logger.log(`Unified check: ${records.length} records found`);
       // Only expose match/no-match — never leak record contents
       return { duplicate: records.length > 0, error: false };
