@@ -432,6 +432,16 @@ export class AdminController {
   }
 
   @UseGuards(SuperAdminGuard)
+  @Post('orders/:id/merge')
+  async mergeOrder(
+    @Param('id', ParseUUIDPipe) id: string,
+    @Req() req: Request,
+  ) {
+    const adminId = (req as any).user?.uid;
+    return this.shopService.mergeOrders(id, adminId);
+  }
+
+  @UseGuards(SuperAdminGuard)
   @Post('orders/:id/message')
   async sendFulfillmentMessage(
     @Param('id', ParseUUIDPipe) id: string,

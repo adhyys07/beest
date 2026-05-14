@@ -25,6 +25,7 @@ export const AUDIT_ACTIONS = [
   'shop_purchase',
   'order_fulfilled',
   'order_refunded',
+  'order_merged',
   'devlog_created',
   'devlog_deleted',
 ] as const;
