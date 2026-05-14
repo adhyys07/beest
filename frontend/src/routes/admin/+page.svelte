@@ -105,6 +105,7 @@
 		beestSlackId: string | null;
 		emailMismatch: boolean;
 		hackatimeProjects: { name: string; hours: number; languages: string[]; firstHeartbeat: number | null }[];
+		categories?: { name: string; totalSeconds: number; percent: number }[];
 		unifiedDuplicate: boolean;
 		unifiedError: boolean;
 	}
@@ -847,6 +848,25 @@
 		return result;
 	});
 
+	// For each pending order, count other pending orders by the same user for
+	// the same shop item — these are mergeable into one fulfillment.
+	let mergeableCounts = $derived.by(() => {
+		const counts: Record<string, number> = {};
+		const groups = new Map<string, string[]>();
+		for (const o of fulfillmentOrders) {
+			if (o.status !== 'pending' || !o.shopItemId) continue;
+			const key = `${o.userId}::${o.shopItemId}`;
+			const arr = groups.get(key);
+			if (arr) arr.push(o.id);
+			else groups.set(key, [o.id]);
+		}
+		for (const ids of groups.values()) {
+			if (ids.length < 2) continue;
+			for (const id of ids) counts[id] = ids.length - 1;
+		}
+		return counts;
+	});
+
 	async function loadFulfillment() {
 		fulfillmentLoading = true;
 		try {
@@ -866,6 +886,19 @@
 		fulfillmentActionLoading = orderId;
 		try {
 			const res = await fetch(`/api/admin/orders/${orderId}/fulfill`, { method: 'POST' });
+			if (res.ok) await loadFulfillment();
+		} finally {
+			fulfillmentActionLoading = '';
+		}
+	}
+
+	async function mergeOrder(order: AdminOrder) {
+		const dupes = mergeableCounts[order.id] ?? 0;
+		if (dupes < 1) return;
+		if (!confirm(`Merge ${dupes} duplicate pending order(s) for ${order.userName} into this one? The merged orders are removed and the quantity is summed onto this order. The user is not notified.`)) return;
+		fulfillmentActionLoading = order.id;
+		try {
+			const res = await fetch(`/api/admin/orders/${order.id}/merge`, { method: 'POST' });
 			if (res.ok) await loadFulfillment();
 		} finally {
 			fulfillmentActionLoading = '';
@@ -1333,6 +1366,11 @@
 											<button class="btn btn-sm btn-primary" onclick={() => fulfillOrder(order.id)} disabled={fulfillmentActionLoading === order.id}>
 												{fulfillmentActionLoading === order.id ? '...' : 'Fulfill'}
 											</button>
+											{#if mergeableCounts[order.id]}
+												<button class="btn btn-sm btn-merge" onclick={() => mergeOrder(order)} disabled={fulfillmentActionLoading === order.id} title="Combine this order with the other pending orders the user placed for the same item">
+													{fulfillmentActionLoading === order.id ? '...' : `Merge (${mergeableCounts[order.id] + 1})`}
+												</button>
+											{/if}
 										{/if}
 										<button class="btn btn-sm btn-danger" onclick={() => refundOrder(order)} disabled={fulfillmentActionLoading === order.id}>
 											{fulfillmentActionLoading === order.id ? '...' : 'Refund'}
@@ -1755,6 +1793,28 @@
 												</div>
 											{:else}
 												<span class="ht-empty">No linked Hackatime projects found</span>
+											{/if}
+											{#if hackatimeData.categories && hackatimeData.categories.length > 0}
+												{@const aiCat = hackatimeData.categories.find((c) => /ai/i.test(c.name))}
+												<div class="ht-categories">
+													<div class="ht-categories-header">
+														<span class="ht-categories-label">Category breakdown</span>
+														{#if aiCat}
+															<span class="ht-ai-pill" class:warn={aiCat.percent >= 30} class:flag={aiCat.percent >= 50}>
+																{aiCat.name}: {aiCat.percent}%
+															</span>
+														{/if}
+													</div>
+													<div class="ht-category-bars">
+														{#each hackatimeData.categories as cat}
+															<div class="ht-category" class:ai={/ai/i.test(cat.name)}>
+																<span class="ht-category-name">{cat.name}</span>
+																<div class="ht-category-bar"><div class="ht-category-fill" style:width="{cat.percent}%"></div></div>
+																<span class="ht-category-pct">{cat.percent}%</span>
+															</div>
+														{/each}
+													</div>
+												</div>
 											{/if}
 											{#if hackatimeData?.unifiedDuplicate}
 												<div class="unified-duplicate-alert">Duplicate Found — This code URL already exists in Unified Approved Projects</div>
@@ -3344,6 +3404,97 @@
 		font-style: italic;
 	}
 
+	.ht-categories {
+		margin-top: 0.6rem;
+		display: flex;
+		flex-direction: column;
+		gap: 0.4rem;
+	}
+
+	.ht-categories-header {
+		display: flex;
+		align-items: center;
+		gap: 0.6rem;
+	}
+
+	.ht-categories-label {
+		font-size: 0.8rem;
+		color: #aaa;
+		font-weight: 600;
+	}
+
+	.ht-ai-pill {
+		background: rgba(91, 155, 213, 0.15);
+		border: 1px solid #5b9bd5;
+		border-radius: 999px;
+		padding: 0.1rem 0.55rem;
+		font-size: 0.75rem;
+		color: #8ec0ec;
+		font-weight: 600;
+	}
+
+	.ht-ai-pill.warn {
+		background: rgba(220, 170, 50, 0.18);
+		border-color: #d4a64a;
+		color: #f0c46a;
+	}
+
+	.ht-ai-pill.flag {
+		background: rgba(220, 50, 50, 0.18);
+		border-color: #c44040;
+		color: #f44336;
+	}
+
+	.ht-category-bars {
+		display: flex;
+		flex-direction: column;
+		gap: 0.25rem;
+	}
+
+	.ht-category {
+		display: grid;
+		grid-template-columns: 9rem 1fr 3rem;
+		align-items: center;
+		gap: 0.5rem;
+		font-size: 0.75rem;
+		color: #ccc;
+	}
+
+	.ht-category-name {
+		color: #ccc;
+		overflow: hidden;
+		text-overflow: ellipsis;
+		white-space: nowrap;
+	}
+
+	.ht-category.ai .ht-category-name {
+		color: #8ec0ec;
+		font-weight: 600;
+	}
+
+	.ht-category-bar {
+		background: #1f1f1f;
+		border: 1px solid #444;
+		border-radius: 3px;
+		height: 0.55rem;
+		overflow: hidden;
+	}
+
+	.ht-category-fill {
+		height: 100%;
+		background: #5b9bd5;
+	}
+
+	.ht-category.ai .ht-category-fill {
+		background: #8ec0ec;
+	}
+
+	.ht-category-pct {
+		text-align: right;
+		color: #aaa;
+		font-variant-numeric: tabular-nums;
+	}
+
 	.unified-duplicate-alert {
 		background: rgba(220, 50, 50, 0.15);
 		border: 2px solid #c44040;
@@ -3994,6 +4145,15 @@
 	.btn-danger:hover:not(:disabled) { background: rgba(196, 131, 130, 0.45); }
 	.admin-shell.light .btn-danger { background: #f5d5d5; color: #c02020; border-color: #aa5050; }
 	.admin-shell.light .btn-danger:hover:not(:disabled) { background: #f0c0c0; }
+
+	.btn-merge {
+		background: rgba(205, 180, 120, 0.22);
+		border-color: #cdb478;
+		color: #f4ead0;
+	}
+	.btn-merge:hover:not(:disabled) { background: rgba(205, 180, 120, 0.4); }
+	.admin-shell.light .btn-merge { background: #f5ecc8; color: #8a6a1f; border-color: #b89a4a; }
+	.admin-shell.light .btn-merge:hover:not(:disabled) { background: #f0e0a8; }
 
 	/* light mode overrides */
 	.admin-shell.light .admin-table th { color: #333; }

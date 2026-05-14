@@ -7,7 +7,7 @@ import {
   Logger,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository, DataSource } from 'typeorm';
+import { Repository, DataSource, In } from 'typeorm';
 import { ShopItem } from '../entities/shop-item.entity';
 import { Order } from '../entities/order.entity';
 import { FulfillmentUpdate } from '../entities/fulfillment-update.entity';
@@ -508,6 +508,94 @@ export class ShopService {
       }
       return { success: true, refundedPipes: snapshot.pipesSpent };
     });
+  }
+
+  /**
+   * Merge other pending orders by the same user for the same shop item into
+   * the target order. The target keeps its id; quantity and pipesSpent are
+   * summed, and any FulfillmentUpdate rows attached to the merged-from orders
+   * are reassigned before those orders are removed. Admin-only — does not
+   * notify the user.
+   */
+  async mergeOrders(targetOrderId: string, adminId?: string) {
+    const result = await this.dataSource.transaction('SERIALIZABLE', async (manager) => {
+      const target = await manager.findOne(Order, {
+        where: { id: targetOrderId },
+        lock: { mode: 'pessimistic_write' },
+      });
+      if (!target) throw new NotFoundException('Order not found');
+      if (target.status !== 'pending') {
+        throw new BadRequestException('Only pending orders can be merged');
+      }
+      if (!target.shopItemId) {
+        throw new BadRequestException(
+          'Cannot merge orders for an item that no longer exists in the shop',
+        );
+      }
+
+      const candidates = await manager.find(Order, {
+        where: {
+          userId: target.userId,
+          shopItemId: target.shopItemId,
+          status: 'pending',
+        },
+        lock: { mode: 'pessimistic_write' },
+      });
+      const others = candidates.filter((o) => o.id !== target.id);
+      if (others.length === 0) {
+        throw new BadRequestException('No matching duplicate orders to merge');
+      }
+
+      let addedQty = 0;
+      let addedPipes = 0;
+      for (const o of others) {
+        addedQty += o.quantity;
+        addedPipes += o.pipesSpent;
+      }
+      target.quantity += addedQty;
+      target.pipesSpent += addedPipes;
+      await manager.save(Order, target);
+
+      // Preserve any fulfillment-update rows on the merged-from orders by
+      // reassigning them to the target before delete (FK cascades would
+      // otherwise drop them when the parent order goes away).
+      const otherIds = others.map((o) => o.id);
+      await manager.update(
+        FulfillmentUpdate,
+        { orderId: In(otherIds) },
+        { orderId: target.id },
+      );
+
+      await manager.remove(Order, others);
+
+      return {
+        target,
+        mergedCount: others.length,
+        addedQty,
+        addedPipes,
+      };
+    });
+
+    await this.auditLogService.log(
+      result.target.userId,
+      'order_merged',
+      `Merged ${result.mergedCount} duplicate order(s) into one — now ${result.target.quantity}x ${result.target.itemName}`,
+    );
+    if (adminId) {
+      await this.auditLogService.log(
+        adminId,
+        'order_merged',
+        `Merged ${result.mergedCount} duplicate order(s) for ${result.target.itemName} (${result.target.quantity}x total)`,
+      );
+    }
+
+    return {
+      success: true,
+      orderId: result.target.id,
+      mergedCount: result.mergedCount,
+      quantity: result.target.quantity,
+      pipesSpent: result.target.pipesSpent,
+    };
   }
 
   /** Send a custom fulfillment message */

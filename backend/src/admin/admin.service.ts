@@ -751,6 +751,7 @@ export class AdminService {
     return {
       projectId,
       hackatimeProjects: [],
+      categories: [],
       totalHours: 0,
       earliestHeartbeat: null,
       previousApprovedHours: project?.overrideHours ?? 0,
@@ -883,6 +884,7 @@ export class AdminService {
       }
 
       let matched: { name: string; hours: number; languages: string[]; firstHeartbeat: number | null }[] = [];
+      let categories: { name: string; totalSeconds: number; percent: number }[] = [];
       if (projectsRes.ok) {
         const projData = await projectsRes.json();
         const allProjects: {
@@ -921,6 +923,44 @@ export class AdminService {
               ),
             ),
           );
+
+          // Pull the Wakatime-compatible categories summary so reviewers can see
+          // how much of the time was "AI Coding" vs regular coding. One stats
+          // call covers all linked projects via filter_by_project.
+          try {
+            const statsRes = await this.hackatimeGet(
+              `/api/v1/users/${encodeURIComponent(String(hackatimeUserId))}/stats` +
+                `?start_date=${AdminService.HACKATIME_EVENT_START}&end_date=${endDatePadded}` +
+                `&filter_by_project=${encodeURIComponent(matchedRaw.map((p) => p.name).join(','))}`,
+            );
+            if (statsRes.ok) {
+              const statsBody = await statsRes.json();
+              const rawCats = statsBody?.data?.categories ?? statsBody?.categories ?? [];
+              if (Array.isArray(rawCats)) {
+                const parsed = rawCats
+                  .map((c: { name?: unknown; total_seconds?: unknown }) => {
+                    const secs = typeof c?.total_seconds === 'number' ? c.total_seconds : Number(c?.total_seconds);
+                    return {
+                      name: typeof c?.name === 'string' ? c.name : '',
+                      totalSeconds: Number.isFinite(secs) && secs > 0 ? secs : 0,
+                    };
+                  })
+                  .filter((c) => c.name && c.totalSeconds > 0);
+                const sum = parsed.reduce((s, c) => s + c.totalSeconds, 0);
+                if (sum > 0) {
+                  categories = parsed
+                    .map((c) => ({
+                      name: c.name,
+                      totalSeconds: c.totalSeconds,
+                      percent: Math.round((c.totalSeconds / sum) * 1000) / 10,
+                    }))
+                    .sort((a, b) => b.percent - a.percent);
+                }
+              }
+            }
+          } catch (err) {
+            this.logger.warn(`Hackatime category stats failed for project ${projectId}: ${err}`);
+          }
 
           matched = matchedRaw.map((p, i) => {
             const fhRaw = p.first_heartbeat ?? null;
@@ -987,6 +1027,7 @@ export class AdminService {
       return {
         projectId,
         hackatimeProjects: matched,
+        categories,
         totalHours,
         earliestHeartbeat,
         previousApprovedHours,
@@ -1007,6 +1048,7 @@ export class AdminService {
       return {
         projectId,
         hackatimeProjects: [],
+        categories: [],
         totalHours: 0,
         earliestHeartbeat: null,
         previousApprovedHours: project.overrideHours ?? 0,
