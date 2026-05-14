@@ -4986,24 +4986,25 @@
   }
 
   .shop-section-title {
-    font-size: 1.1rem;
-    font-weight: 700;
-    letter-spacing: 0.05em;
-    text-transform: uppercase;
-    color: #3a3832;
     margin: 0 0 14px 0;
-    opacity: 0.6;
+    font-family: "Stone Breaker", "Courier New", monospace;
+    font-size: clamp(28px, 3vw, 42px);
+    letter-spacing: 0.04em;
+    color: #e6f4fe;
+    text-shadow: 0 2px 6px rgba(0, 0, 0, 0.4);
   }
 
   .shop-grid {
     display: grid;
     grid-template-columns: repeat(3, 1fr);
     gap: 20px;
-    justify-content: center;
+    justify-content: start;
   }
 
   .shop-grid-featured {
-    grid-template-columns: repeat(auto-fit, minmax(220px, calc((100% - 40px) / 3)));
+    /* match the all-items grid: same 3 cols, left-aligned */
+    grid-template-columns: repeat(3, 1fr);
+    justify-content: start;
   }
 
   .shop-card-featured {
