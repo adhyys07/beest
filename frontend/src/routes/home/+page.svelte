@@ -32,7 +32,6 @@
 
   let { data } = $props();
 
-  let mobileWarningDismissed = $state(false);
   let activeSection = $state('projects');
   let tileLoaded = $state(false);
   let customCursorEnabled = $state(typeof localStorage !== 'undefined' ? localStorage.getItem('customCursor') !== 'off' : true);
@@ -1004,14 +1003,14 @@
   ];
 
   const navItems = [
-    { id: 'projects', label: 'Projects' },
-    { id: 'shop', label: 'Shop' },
-    { id: 'explore', label: 'Explore' },
-    { id: 'leaderboard', label: 'Leaderboard' },
-    { id: 'faq', label: 'FAQ' },
-    { id: 'me', label: 'Me' },
-    { id: 'devlogs', label: 'Devlogs' },
-    { id: 'tutorial', label: 'Tutorial' }
+    { id: 'projects', label: 'Projects', mobile: true },
+    { id: 'shop', label: 'Shop', mobile: true },
+    { id: 'explore', label: 'Explore', mobile: true },
+    { id: 'leaderboard', label: 'Leaderboard', mobile: false },
+    { id: 'faq', label: 'FAQ', mobile: false },
+    { id: 'me', label: 'Me', mobile: true },
+    { id: 'devlogs', label: 'Devlogs', mobile: false },
+    { id: 'tutorial', label: 'Tutorial', mobile: false }
   ];
 
   function navigate(id: string) {
@@ -1303,24 +1302,7 @@
   });
 </script>
 
-<div class="home" class:tile-loaded={tileLoaded} class:mobile-warning-active={!mobileWarningDismissed}>
-
-  <!-- Mobile warning -->
-  {#if !mobileWarningDismissed}
-  <div class="mobile-warning">
-    <div class="mobile-warning-inner">
-      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="mobile-warning-icon">
-        <path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/>
-        <line x1="12" y1="9" x2="12" y2="13"/>
-        <line x1="12" y1="17" x2="12.01" y2="17"/>
-      </svg>
-      <p class="mobile-warning-text">
-        <strong>#BEEST</strong> is built for desktop. For the best experience, please visit on a computer.
-      </p>
-      <button class="mobile-warning-dismiss" onclick={() => mobileWarningDismissed = true}>Continue anyway</button>
-    </div>
-  </div>
-  {/if}
+<div class="home" class:tile-loaded={tileLoaded}>
 
   <!-- Sidebar -->
   <nav class="sidebar pinned" aria-label="Home navigation">
@@ -1330,7 +1312,7 @@
         <p class="sidebar-greeting">Hey {data.user.nickname ?? data.user.name ?? 'there!'}</p>
         <ul class="sidebar-nav">
           {#each navItems as item}
-            <li>
+            <li class:mobile-only-hide={!item.mobile}>
               <button
                 class="nav-btn"
                 class:active={activeSection === item.id}
@@ -7357,67 +7339,6 @@
     text-shadow: 2px 2px 0 rgba(0, 0, 0, 0.3);
   }
 
-  /* ── mobile warning ───────────────────────────────── */
-  .mobile-warning {
-    display: none;
-    position: fixed;
-    inset: 0;
-    z-index: 9999;
-    background: #4b4840;
-    align-items: center;
-    justify-content: center;
-    padding: 32px;
-  }
-
-  .mobile-warning-inner {
-    text-align: center;
-    max-width: 360px;
-  }
-
-  .mobile-warning-icon {
-    width: 48px;
-    height: 48px;
-    color: #c48382;
-    margin-bottom: 20px;
-  }
-
-  .mobile-warning-text {
-    font-family: "Stone Breaker", "Courier New", monospace;
-    font-size: 18px;
-    color: #cbc1ae;
-    line-height: 1.5;
-    margin: 0;
-  }
-
-  .mobile-warning-text strong {
-    font-family: "Stone Breaker", "Courier New", monospace;
-    font-size: 20px;
-    color: #e6f4fe;
-  }
-
-  .mobile-warning-dismiss {
-    margin-top: 24px;
-    padding: 10px 28px;
-    font-family: "Stone Breaker", "Courier New", monospace;
-    font-size: 16px;
-    color: #e6f4fe;
-    background: rgba(230, 244, 254, 0.1);
-    border: 1px solid rgba(230, 244, 254, 0.25);
-    border-radius: 6px;
-    cursor: pointer;
-  }
-
-  @media (max-width: 600px) {
-    .mobile-warning {
-      display: flex;
-    }
-
-    .mobile-warning-active .sidebar,
-    .mobile-warning-active .main {
-      display: none;
-    }
-  }
-
   /* ── responsive ─────────────────────────────────── */
   @media (min-width: 1200px) {
     .form-gear {
@@ -7429,7 +7350,9 @@
   }
 
   @media (max-width: 900px) {
-    .sidebar {
+    .sidebar,
+    .sidebar.pinned,
+    .sidebar:hover {
       position: fixed;
       top: auto;
       bottom: 0;
@@ -7442,21 +7365,29 @@
       transition: none;
     }
 
-    .sidebar:hover {
-      width: 100%;
-    }
-
     .teeth,
-    .sidebar-panel {
+    .expand-hint {
       display: none;
     }
 
+    .sidebar-panel {
+      position: static;
+      max-width: 100%;
+      width: 100%;
+      height: auto;
+      background: transparent;
+    }
+
     .sidebar-content {
+      position: static;
       flex-direction: row;
       align-items: center;
       padding: 0;
       width: 100%;
+      height: auto;
       opacity: 1;
+      transform: none;
+      overflow: visible;
       transition: none;
     }
 
@@ -7477,12 +7408,28 @@
     .nav-btn {
       flex-direction: column;
       align-items: center;
+      justify-content: center;
       gap: 2px;
-      padding: 8px 4px;
-      font-size: 10px;
+      padding: 18px 2px;
+      font-size: clamp(10px, 2.6vw, 13px);
+      line-height: 1;
+      letter-spacing: 0.02em;
       border-radius: 4px;
       border-width: 2px;
       border-bottom-width: 4px;
+      white-space: nowrap;
+      min-width: 0;
+    }
+
+    .sidebar-nav li {
+      flex: 1 1 0;
+      min-width: 0;
+      display: flex;
+    }
+
+    /* Reserve room for the now-taller bottom nav */
+    .main {
+      padding-bottom: 96px !important;
     }
 
     .nav-btn:active {
@@ -7587,6 +7534,151 @@
       flex-direction: column;
     }
 
+    /* Strip noisy desktop-only widgets on mobile */
+    .bottom-row,
+    .sticker-promo,
+    .progress-key,
+    .mobile-only-hide {
+      display: none !important;
+    }
+
+    .section-header {
+      flex-direction: column;
+      gap: 8px;
+    }
+
+    /* Single-column project list on mobile */
+    .projects-box.has-projects {
+      column-count: 1 !important;
+    }
+
+    /* Stack thumb above info so description has room */
+    .project-card {
+      flex-direction: column;
+      gap: 14px;
+      padding: 20px 16px 16px;
+    }
+
+    .project-card.landscape .project-thumb,
+    .project-card:not(.landscape) .project-thumb,
+    .cat-placeholder {
+      width: 100% !important;
+      max-width: 100%;
+      height: auto;
+      align-self: stretch;
+    }
+
+    .project-card.landscape .project-thumb {
+      aspect-ratio: 16 / 9;
+    }
+
+    .project-header-row {
+      flex-wrap: wrap;
+    }
+
+    .project-desc {
+      font-size: 16px;
+    }
+
+    .section-title {
+      font-size: clamp(24px, 7vw, 32px);
+    }
+
+    /* Create / edit form: drop the desktop-style left gutter and side gears */
+    .create-project-form {
+      padding: 24px 16px 32px;
+    }
+
+    .form-gear,
+    .form-row,
+    .form-bottom-row {
+      flex-direction: column;
+    }
+
+    .form-row {
+      display: flex;
+      gap: 16px;
+    }
+
+    .form-actions {
+      margin-left: 0;
+      flex-wrap: wrap;
+    }
+
+    /* Leaderboard: trim columns so rows don't overflow */
+    .leaderboard-table {
+      font-size: 14px;
+    }
+
+    /* Project actions row should wrap rather than overflow */
+    .project-actions-row {
+      flex-wrap: wrap;
+      gap: 10px;
+    }
+
+    /* Shop header: title row should use full width, not be squeezed by actions */
+    .shop-header {
+      flex-direction: column;
+      align-items: stretch;
+      gap: 16px;
+      padding: 20px 18px;
+    }
+    .shop-header-actions {
+      justify-content: space-between;
+    }
+
+    /* Me page: stack the two columns instead of side-by-side */
+    .me-columns {
+      flex-direction: column;
+      gap: 24px;
+    }
+
+    .fulfillment-card {
+      position: static;
+    }
+
+    .account-card {
+      max-width: 100%;
+      margin-top: 0;
+    }
+
+    /* Stack label/value vertically so long emails / IDs don't get split character-by-character */
+    .account-field {
+      flex-direction: column;
+      align-items: stretch;
+      gap: 2px;
+    }
+
+    .account-value {
+      text-align: left;
+      word-break: normal;
+      overflow-wrap: anywhere;
+    }
+
+    .nickname-form {
+      width: 100%;
+    }
+
+    .nickname-input {
+      width: 100%;
+      text-align: left;
+      box-sizing: border-box;
+    }
+  }
+
+  @media (max-width: 600px) {
+    .shop-grid {
+      grid-template-columns: repeat(2, 1fr) !important;
+      gap: 10px;
+    }
+
+    .explore-grid {
+      grid-template-columns: repeat(2, 1fr) !important;
+    }
+
+    .shop-warning-banner {
+      margin: 16px 0;
+    }
   }
 
 
