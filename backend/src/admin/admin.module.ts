@@ -19,6 +19,7 @@ import { FraudReviewModule } from '../fraud-review/fraud-review.module';
 import { ProjectAirtableSyncModule } from '../projects/project-airtable-sync.module';
 import { AdminController } from './admin.controller';
 import { AdminService } from './admin.service';
+import { AuditService } from './audit.service';
 import { SuperAdminGuard } from './super-admin.guard';
 import { ReviewerGuard } from './reviewer.guard';
 
@@ -35,6 +36,6 @@ import { ReviewerGuard } from './reviewer.guard';
     ProjectAirtableSyncModule,
   ],
   controllers: [AdminController],
-  providers: [AdminService, SuperAdminGuard, ReviewerGuard],
+  providers: [AdminService, AuditService, SuperAdminGuard, ReviewerGuard],
 })
 export class AdminModule {}

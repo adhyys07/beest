@@ -7,14 +7,16 @@ import {
   Param,
   Body,
   Req,
+  Res,
   UseGuards,
   BadRequestException,
   ParseUUIDPipe,
 } from '@nestjs/common';
-import type { Request } from 'express';
+import type { Request, Response } from 'express';
 import { SuperAdminGuard } from './super-admin.guard';
 import { ReviewerGuard } from './reviewer.guard';
 import { AdminService } from './admin.service';
+import { AuditService, type AuditAction } from './audit.service';
 import { AuditLogService } from '../audit-log/audit-log.service';
 import { AuthService } from '../auth/auth.service';
 import { ShopService } from '../shop/shop.service';
@@ -24,6 +26,7 @@ import { DevlogsService } from '../devlogs/devlogs.service';
 export class AdminController {
   constructor(
     private readonly adminService: AdminService,
+    private readonly auditService: AuditService,
     private readonly auditLogService: AuditLogService,
     private readonly authService: AuthService,
     private readonly shopService: ShopService,
@@ -255,6 +258,71 @@ export class AdminController {
       throw new BadRequestException(`window must be one of: ${validWindows.join(', ')}`);
     }
     return this.adminService.getReviewLeaderboard(win as '24h' | '7d' | '30d' | 'all');
+  }
+
+  // ── Admin audit queue ──
+  // Projects parked in 'fraud_pending' after first-reviewer approval are queued
+  // here for a super-admin audit before pipes are paid out and the project syncs
+  // to Airtable. Super-admin only.
+
+  @UseGuards(SuperAdminGuard)
+  @Get('audit/queue')
+  auditQueue() {
+    return this.auditService.listQueue();
+  }
+
+  @UseGuards(SuperAdminGuard)
+  @Post('audit/:id/decision')
+  async auditDecision(
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body()
+    body: {
+      action?: string;
+      overrideHours?: number | null;
+      internalHours?: number | null;
+      justification?: string | null;
+      reviewerFeedback?: string | null;
+      userFeedback?: string | null;
+    },
+    @Req() req: Request,
+  ) {
+    const validActions = ['approve', 'rereview', 'reject'];
+    if (!body.action || !validActions.includes(body.action)) {
+      throw new BadRequestException(
+        `action must be one of: ${validActions.join(', ')}`,
+      );
+    }
+    const superAdminId = (req as any).user?.uid;
+    return this.auditService.decide(id, superAdminId, {
+      action: body.action as AuditAction,
+      overrideHours: body.overrideHours ?? null,
+      internalHours: body.internalHours ?? null,
+      justification: body.justification ?? null,
+      reviewerFeedback: body.reviewerFeedback ?? null,
+      userFeedback: body.userFeedback ?? null,
+    });
+  }
+
+  @UseGuards(SuperAdminGuard)
+  @Get('audit/:id/activity')
+  async auditActivity(
+    @Param('id', ParseUUIDPipe) id: string,
+    @Res() res: Response,
+  ) {
+    res.setHeader('Content-Type', 'application/x-ndjson; charset=utf-8');
+    res.setHeader('Cache-Control', 'no-cache');
+    res.setHeader('X-Accel-Buffering', 'no');
+    try {
+      for await (const evt of this.auditService.streamActivityEvents(id)) {
+        res.write(JSON.stringify(evt) + '\n');
+        // flush eagerly so the client sees per-day progress
+        (res as any).flush?.();
+      }
+    } catch {
+      res.write(JSON.stringify({ type: 'error', error: 'stream-failed' }) + '\n');
+    } finally {
+      res.end();
+    }
   }
 
   @UseGuards(SuperAdminGuard)

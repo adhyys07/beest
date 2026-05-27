@@ -69,7 +69,9 @@
   let newsItems = $state<{ id: string; text: string; displayDate: string }[]>([]);
   let leaderboard = $state<{ name: string; hours: number }[]>([]);
   let leaderboardLoading = $state(true);
-  let leaderboardVisible = $state(10);
+  let leaderboardTotal = $state(0);
+  let leaderboardLoadingMore = $state(false);
+  const LEADERBOARD_PAGE_SIZE = 10;
   let exploreProjects = $state<{ id: string; name: string; description: string; projectType: string; screenshot1Url: string | null; screenshot2Url: string | null; codeUrl: string | null; demoUrl: string | null; hours: number; builderName: string }[]>([]);
   let exploreLoading = $state(true);
 
@@ -439,14 +441,30 @@
   async function fetchLeaderboard() {
     leaderboardLoading = true;
     try {
-      const res = await fetch('/api/leaderboard');
+      const res = await fetch(`/api/leaderboard?limit=${LEADERBOARD_PAGE_SIZE}&offset=0`);
       if (res.ok) {
         const data = await res.json();
         leaderboard = Array.isArray(data.leaderboard) ? data.leaderboard : [];
         totalBuilders = data.totalUsers ?? 0;
+        leaderboardTotal = typeof data.total === 'number' ? data.total : leaderboard.length;
       }
     } catch { /* silent */ }
     leaderboardLoading = false;
+  }
+
+  async function loadMoreLeaderboard() {
+    if (leaderboardLoadingMore || leaderboard.length >= leaderboardTotal) return;
+    leaderboardLoadingMore = true;
+    try {
+      const res = await fetch(`/api/leaderboard?limit=${LEADERBOARD_PAGE_SIZE}&offset=${leaderboard.length}`);
+      if (res.ok) {
+        const data = await res.json();
+        const next = Array.isArray(data.leaderboard) ? data.leaderboard : [];
+        leaderboard = [...leaderboard, ...next];
+        if (typeof data.total === 'number') leaderboardTotal = data.total;
+      }
+    } catch { /* silent */ }
+    leaderboardLoadingMore = false;
   }
 
   async function fetchExploreProjects() {
@@ -2355,19 +2373,24 @@
               </div>
             {/each}
           {:else if leaderboard.length > 0}
-            {#each leaderboard.slice(0, leaderboardVisible) as entry, i}
+            {#each leaderboard as entry, i}
               <div class="leaderboard-row" class:top-three={i < 3}>
                 <span class="lb-rank">{i + 1}</span>
                 <span class="lb-name">{entry.name}</span>
                 <span class="lb-hours">{Math.round(entry.hours * 10) / 10}h</span>
               </div>
             {/each}
-            {#if leaderboardVisible < leaderboard.length}
+            {#if leaderboard.length < leaderboardTotal}
               <button
                 type="button"
                 class="lb-show-more"
-                onclick={() => leaderboardVisible += 10}>
-                Show more ({Math.min(10, leaderboard.length - leaderboardVisible)} more)
+                onclick={loadMoreLeaderboard}
+                disabled={leaderboardLoadingMore}>
+                {#if leaderboardLoadingMore}
+                  Loading…
+                {:else}
+                  Show more ({Math.min(LEADERBOARD_PAGE_SIZE, leaderboardTotal - leaderboard.length)} more)
+                {/if}
               </button>
             {/if}
           {/if}

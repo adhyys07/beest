@@ -25,3 +25,7 @@ Thumbs.db
 .claude/
 CLAUDE.md
 .mcp.json
+
+# Dev-server stdout captures
+*-dev.log
+*.log

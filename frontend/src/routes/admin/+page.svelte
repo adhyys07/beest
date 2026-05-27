@@ -976,6 +976,9 @@
 		{/if}
 		<button class="tab" class:active={activeTab === 'projects'} onclick={() => activeTab = 'projects'}>Projects</button>
 		<button class="tab" class:active={activeTab === 'leaderboard'} onclick={() => activeTab = 'leaderboard'}>Leaderboard</button>
+		{#if isSuperAdmin}
+			<a href="/admin/audit" class="tab tab-audit">Audit</a>
+		{/if}
 		<a href="/home" class="tab tab-home">Home</a>
 	</nav>
 
