@@ -462,6 +462,7 @@
 		padding: 1.5rem 1rem;
 		display: flex;
 		justify-content: center;
+		align-items: flex-start;
 	}
 	.paper {
 		width: 100%;
