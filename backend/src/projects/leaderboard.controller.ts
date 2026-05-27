@@ -1,4 +1,4 @@
-import { Controller, Get, UseGuards } from '@nestjs/common';
+import { Controller, Get, Query, UseGuards } from '@nestjs/common';
 import { Throttle } from '@nestjs/throttler';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
@@ -7,8 +7,20 @@ import { HackatimeService } from '../hackatime/hackatime.service';
 import { User } from '../entities/user.entity';
 import { ProjectsService } from './projects.service';
 
+type LeaderboardEntry = { name: string; hours: number };
+
 @Controller('api/leaderboard')
 export class LeaderboardController {
+  // Computing the full leaderboard requires one Hackatime /projects call per
+  // builder, so pagination caches the sorted list for a short window. Every
+  // "show more" click hits the cache rather than re-fanning out to Hackatime.
+  private cache: {
+    entries: LeaderboardEntry[];
+    totalUsers: number;
+    timestamp: number;
+  } | null = null;
+  private static readonly CACHE_TTL_MS = 60_000;
+
   constructor(
     private readonly projectsService: ProjectsService,
     private readonly hackatimeService: HackatimeService,
@@ -17,13 +29,36 @@ export class LeaderboardController {
   ) {}
 
   /**
-   * Returns the top 10 users by approved Hackatime hours.
-   * No PII is exposed — only display names and hours.
+   * Returns a paginated slice of the leaderboard, sorted by approved Hackatime
+   * hours descending. `limit` defaults to 10, capped at 100. No PII is exposed
+   * — only display names and hours.
    */
-  @Throttle({ default: { limit: 5, ttl: 60000 } })
+  @Throttle({ default: { limit: 15, ttl: 60000 } })
   @UseGuards(JwtAuthGuard)
   @Get()
-  async getLeaderboard() {
+  async getLeaderboard(
+    @Query('limit') limitRaw?: string,
+    @Query('offset') offsetRaw?: string,
+  ) {
+    const limit = Math.min(100, Math.max(1, Number.parseInt(limitRaw ?? '', 10) || 10));
+    const offset = Math.max(0, Number.parseInt(offsetRaw ?? '', 10) || 0);
+
+    const { entries, totalUsers } = await this.getEntries();
+
+    return {
+      leaderboard: entries.slice(offset, offset + limit),
+      totalUsers,
+      total: entries.length,
+      offset,
+      limit,
+    };
+  }
+
+  private async getEntries(): Promise<{ entries: LeaderboardEntry[]; totalUsers: number }> {
+    if (this.cache && Date.now() - this.cache.timestamp < LeaderboardController.CACHE_TTL_MS) {
+      return { entries: this.cache.entries, totalUsers: this.cache.totalUsers };
+    }
+
     const [grouped, totalUsers] = await Promise.all([
       this.projectsService.findApprovedProjectsGroupedByUser(),
       this.userRepo.count(),
@@ -56,15 +91,15 @@ export class LeaderboardController {
       }),
     );
 
-    const leaderboard = results
+    const entries: LeaderboardEntry[] = results
       .filter(
-        (r): r is PromiseFulfilledResult<{ name: string; hours: number }> =>
+        (r): r is PromiseFulfilledResult<LeaderboardEntry> =>
           r.status === 'fulfilled' && r.value.hours > 0,
       )
       .map((r) => r.value)
-      .sort((a, b) => b.hours - a.hours)
-      .slice(0, 10);
+      .sort((a, b) => b.hours - a.hours);
 
-    return { leaderboard, totalUsers };
+    this.cache = { entries, totalUsers, timestamp: Date.now() };
+    return { entries, totalUsers };
   }
 }

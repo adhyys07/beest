@@ -20,7 +20,6 @@ import { RsvpService } from '../rsvp/rsvp.service';
 import { AuditLogService } from '../audit-log/audit-log.service';
 import { HcaService } from '../hca/hca.service';
 import { fetchWithTimeout } from '../fetch.util';
-import { FraudReviewService } from '../fraud-review/fraud-review.service';
 import { ProjectAirtableSyncService } from '../projects/project-airtable-sync.service';
 
 const VALID_PERMS = [
@@ -89,7 +88,6 @@ export class AdminService {
     private readonly rsvpService: RsvpService,
     private readonly auditLogService: AuditLogService,
     private readonly hcaService: HcaService,
-    private readonly fraudReviewService: FraudReviewService,
     private readonly airtableSync: ProjectAirtableSyncService,
   ) {
     this.hackatimeBaseUrl = this.configService.get(
@@ -554,20 +552,9 @@ export class AdminService {
     // 5. Audit log to the project owner (not the reviewer)
     const label =
       status === 'approved'
-        ? `Project "${project.name}" was approved by reviewer — awaiting fraud check`
+        ? `Project "${project.name}" was approved by reviewer`
         : `Project "${project.name}" received feedback`;
     await this.auditLogService.log(project.userId, 'project_reviewed', label);
-
-    // 6. Stage the project for the joe.fraud first-pass review. Loops sync and
-    //    the Airtable Projects push are deferred to FraudReviewService.completeApproval
-    //    once the fraud verdict clears.
-    if (status === 'approved') {
-      try {
-        await this.fraudReviewService.stageProjectForReview(project.id);
-      } catch (err) {
-        this.logger.error(`Failed to stage fraud review for ${project.id}: ${err}`);
-      }
-    }
 
     return { success: true };
   }

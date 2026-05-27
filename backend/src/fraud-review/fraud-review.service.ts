@@ -90,14 +90,7 @@ export class FraudReviewService implements OnApplicationBootstrap, OnApplication
   // ── Lifecycle ──────────────────────────────────────────────────────────────
 
   onApplicationBootstrap() {
-    if (!this.configured) return;
-    this.pollTimer = setInterval(() => {
-      this.poll().catch((err) =>
-        this.logger.error(`Fraud poll cycle failed: ${err}`),
-      );
-    }, POLL_INTERVAL_MS);
-    // Don't keep the event loop alive for a periodic timer.
-    this.pollTimer.unref?.();
+    return;
   }
 
   onApplicationShutdown() {

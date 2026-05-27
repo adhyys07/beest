@@ -1,0 +1,409 @@
+import {
+  Injectable,
+  Logger,
+  BadRequestException,
+  NotFoundException,
+} from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
+import { InjectRepository } from '@nestjs/typeorm';
+import { Repository } from 'typeorm';
+import { Project } from '../entities/project.entity';
+import { Submission } from '../entities/submission.entity';
+import { ProjectReview } from '../entities/project-review.entity';
+import { User } from '../entities/user.entity';
+import { AuditLogService } from '../audit-log/audit-log.service';
+import { RsvpService } from '../rsvp/rsvp.service';
+import { ProjectAirtableSyncService } from '../projects/project-airtable-sync.service';
+import { fetchWithTimeout } from '../fetch.util';
+
+// Beest event start — Hackatime time before this date is ignored, matching the
+// rest of the admin Hackatime tooling.
+
+export type AuditAction = 'approve' | 'rereview' | 'reject';
+
+export interface AuditDecisionDto {
+  action: AuditAction;
+  // approve
+  overrideHours?: number | null;
+  internalHours?: number | null;
+  justification?: string | null;
+  // rereview (feedback to the first reviewer, internal)
+  reviewerFeedback?: string | null;
+  // reject (feedback to the user)
+  userFeedback?: string | null;
+}
+
+function parseHackatimeNames(raw: string | string[] | null | undefined): string[] {
+  if (!raw) return [];
+  // The Project entity transforms this column to a string[] already, but guard
+  // against a raw string (JSON or comma-separated) just in case.
+  if (Array.isArray(raw)) {
+    return raw.map((s) => String(s).trim()).filter(Boolean);
+  }
+  const trimmed = raw.trim();
+  if (!trimmed) return [];
+  try {
+    const parsed = JSON.parse(trimmed);
+    if (Array.isArray(parsed)) {
+      return parsed.map((s) => String(s).trim()).filter(Boolean);
+    }
+    if (typeof parsed === 'string') return [parsed.trim()].filter(Boolean);
+  } catch {
+    // not JSON — fall back to comma-separated
+  }
+  return trimmed
+    .split(',')
+    .map((s) => s.trim())
+    .filter(Boolean);
+}
+
+@Injectable()
+export class AuditService {
+  private readonly logger = new Logger(AuditService.name);
+
+  constructor(
+    private readonly config: ConfigService,
+    @InjectRepository(Project) private readonly projectRepo: Repository<Project>,
+    @InjectRepository(Submission)
+    private readonly submissionRepo: Repository<Submission>,
+    @InjectRepository(ProjectReview)
+    private readonly reviewRepo: Repository<ProjectReview>,
+    @InjectRepository(User) private readonly userRepo: Repository<User>,
+    private readonly auditLogService: AuditLogService,
+    private readonly rsvpService: RsvpService,
+    private readonly airtableSync: ProjectAirtableSyncService,
+  ) {
+      'HACKATIME_BASE_URL',
+      'https://hackatime.hackclub.com',
+    );
+  }
+
+  // ── Queue ──────────────────────────────────────────────────────────────────
+
+  /**
+   * Projects awaiting a super-admin second pass. These are first-reviewer
+   * approved projects parked in `fraud_pending` (the old fraud-review holding
+   * state, now repurposed as the second-pass queue). Oldest first.
+   */
+  async listQueue(): Promise<unknown[]> {
+    const projects = await this.projectRepo.find({
+      where: { status: 'fraud_pending' },
+      relations: ['user'],
+      order: { createdAt: 'ASC' },
+    });
+
+    return Promise.all(projects.map((p) => this.serializeQueueItem(p)));
+  }
+
+  private async serializeQueueItem(project: Project) {
+    const [originalApproval, submission] = await Promise.all([
+      this.reviewRepo.findOne({
+        where: { projectId: project.id, status: 'approved' },
+        order: { createdAt: 'DESC' },
+      }),
+      this.submissionRepo.findOne({
+        where: { projectId: project.id },
+        order: { createdAt: 'DESC' },
+      }),
+    ]);
+
+    let reviewerName: string | null = null;
+    if (originalApproval?.reviewerId) {
+      const reviewer = await this.userRepo.findOne({
+        where: { id: originalApproval.reviewerId },
+      });
+      reviewerName = reviewer?.nickname || reviewer?.name || null;
+    }
+
+    const user = project.user;
+    return {
+      id: project.id,
+      name: project.name,
+      description: project.description,
+      projectType: project.projectType,
+      codeUrl: project.codeUrl,
+      readmeUrl: project.readmeUrl,
+      demoUrl: project.demoUrl,
+      screenshot1Url: project.screenshot1Url,
+      screenshot2Url: project.screenshot2Url,
+      hackatimeProjectNames: parseHackatimeNames(project.hackatimeProjectName),
+      aiUse: project.aiUse,
+      isUpdate: project.isUpdate,
+      otherHcProgram: project.otherHcProgram,
+      overrideHours: project.overrideHours ?? 0,
+      internalHours: project.internalHours ?? 0,
+      pipesGranted: project.pipesGranted ?? 0,
+      createdAt: project.createdAt,
+      owner: user
+        ? {
+            id: user.id,
+            name: user.name,
+            nickname: user.nickname,
+            slackId: user.slackId,
+            email: user.email,
+            hackatimeConnected: !!user.hackatimeToken,
+          }
+        : null,
+      originalApproval: originalApproval
+        ? {
+            reviewerId: originalApproval.reviewerId,
+            reviewerName,
+            overrideJustification: originalApproval.overrideJustification,
+            feedback: originalApproval.feedback,
+            internalNote: originalApproval.internalNote,
+            createdAt: originalApproval.createdAt,
+          }
+        : null,
+      submission: submission
+        ? {
+            id: submission.id,
+            changeDescription: submission.changeDescription,
+            overrideHours: submission.overrideHours,
+            createdAt: submission.createdAt,
+          }
+        : null,
+    };
+  }
+
+  // ── Decision ─────────────────────────────────────────────────────────────--
+
+  async decide(
+    projectId: string,
+    superAdminId: string,
+    dto: AuditDecisionDto,
+  ): Promise<{ success: true }> {
+    const project = await this.projectRepo.findOne({
+      where: { id: projectId },
+      relations: ['user'],
+    });
+    if (!project) throw new NotFoundException('Project not found');
+    if (project.status !== 'fraud_pending') {
+      throw new BadRequestException(
+        `Project is not awaiting second review (status: ${project.status}).`,
+      );
+    }
+
+    const submission = await this.submissionRepo.findOne({
+      where: { projectId },
+      order: { createdAt: 'DESC' },
+    });
+
+    switch (dto.action) {
+      case 'approve':
+        return this.approve(project, submission, superAdminId, dto);
+      case 'rereview':
+        return this.returnForReReview(project, submission, superAdminId, dto);
+      case 'reject':
+        return this.reject(project, submission, superAdminId, dto);
+      default:
+        throw new BadRequestException('Unknown action');
+    }
+  }
+
+  /** Final approval: grant pipes + push to Airtable (relocated from the old
+   * fraud-review poller's completeApproval). */
+  private async approve(
+    project: Project,
+    submission: Submission | null,
+    superAdminId: string,
+    dto: AuditDecisionDto,
+  ): Promise<{ success: true }> {
+    const justification = (dto.justification ?? '').trim();
+    if (justification.length < 50) {
+      throw new BadRequestException(
+        'Approval justification must be at least 50 characters.',
+      );
+    }
+
+    // Optional hours override (e.g. after excluding AI-coding time via the
+    // heartbeat pills). Treated as the FINAL cumulative approved hours. The
+    // super-admin's number is the final say, so it overwrites BOTH the
+    // user-facing overrideHours (drives pipes) AND internalHours (what
+    // syncApprovedProject pushes to Airtable's Override Hours Spent field).
+    if (dto.overrideHours !== null && dto.overrideHours !== undefined) {
+      const finalHours = Math.round(dto.overrideHours * 10) / 10;
+      if (!Number.isFinite(finalHours) || finalHours <= 0) {
+        throw new BadRequestException('overrideHours must be a positive number.');
+      }
+      if (finalHours < (project.pipesGranted ?? 0)) {
+        throw new BadRequestException(
+          `Cannot reduce hours to ${finalHours} — ${project.pipesGranted} pipes already granted.`,
+        );
+      }
+      project.overrideHours = finalHours;
+      project.internalHours = finalHours;
+      if (submission) {
+        submission.overrideHours = finalHours;
+        submission.internalHours = finalHours;
+      }
+    }
+
+    project.status = 'approved';
+    await this.projectRepo.save(project);
+
+    if (submission && submission.status !== 'approved') {
+      submission.status = 'approved';
+      await this.submissionRepo.save(submission);
+    }
+
+    // Grant pipes — delta logic identical to the previous fraud poller path.
+    if ((project.overrideHours ?? 0) > 0) {
+      const totals = await this.projectRepo
+        .createQueryBuilder('p')
+        .select('COALESCE(SUM(p.override_hours), 0)', 'earnedHours')
+        .addSelect('COALESCE(SUM(p.pipes_granted), 0)', 'granted')
+        .where('p.user_id = :uid', { uid: project.userId })
+        .andWhere(
+          `(p.status = 'approved' OR (p.status <> 'approved' AND p.pipes_granted > 0))`,
+        )
+        .getRawOne<{ earnedHours: string; granted: string }>();
+      const target = Math.floor(Number(totals?.earnedHours ?? 0));
+      const previouslyGranted = Number(totals?.granted ?? 0);
+      const delta = target - previouslyGranted;
+      if (delta > 0) {
+        await this.userRepo.increment({ id: project.userId }, 'pipes', delta);
+        project.pipesGranted = (project.pipesGranted ?? 0) + delta;
+        await this.projectRepo.save(project);
+        if (submission) {
+          submission.pipesGranted = delta;
+          await this.submissionRepo.save(submission);
+        }
+      }
+    }
+
+    // Record the second-pass approval.
+    const review = this.reviewRepo.create({
+      projectId: project.id,
+      reviewerId: superAdminId,
+      submissionId: submission?.id ?? null,
+      status: 'approved',
+      feedback: null,
+      internalNote: 'Second-pass (super admin) approval',
+      overrideJustification: justification,
+    });
+    await this.reviewRepo.save(review);
+
+    // Loops + Airtable Projects push — now gated to this stage only.
+    if (project.user?.email) {
+      this.rsvpService.updateDateField(
+        project.user.email,
+        'Loops - beestApprovedProject',
+      );
+    }
+    try {
+      await this.airtableSync.syncApprovedProject(
+        project,
+        justification,
+        submission ?? null,
+      );
+    } catch (err) {
+      this.logger.error(
+        `Airtable sync failed for second-pass-approved project ${project.id}: ${err}`,
+      );
+    }
+
+    await this.auditLogService.log(
+      project.userId,
+      'project_reviewed',
+      `Project "${project.name}" was approved`,
+    );
+    this.logger.log(`Second-pass approved project ${project.id}`);
+    return { success: true };
+  }
+
+  /** Send back to the first-review queue with feedback for the first reviewer
+   * (internal — the user is not notified). */
+  private async returnForReReview(
+    project: Project,
+    submission: Submission | null,
+    superAdminId: string,
+    dto: AuditDecisionDto,
+  ): Promise<{ success: true }> {
+    const feedback = (dto.reviewerFeedback ?? '').trim();
+    if (feedback.length < 10) {
+      throw new BadRequestException(
+        'Re-review feedback must be at least 10 characters.',
+      );
+    }
+
+    // Revert the pending approval delta this submission contributed, so a
+    // re-approval re-adds it cleanly rather than double-counting.
+    const subOverride = submission?.overrideHours ?? 0;
+    const subInternal = submission?.internalHours ?? 0;
+    if (subOverride > 0) {
+      project.overrideHours = Math.max(
+        0,
+        Math.round(((project.overrideHours ?? 0) - subOverride) * 10) / 10,
+      );
+    }
+    if (subInternal > 0) {
+      project.internalHours = Math.max(
+        0,
+        Math.round(((project.internalHours ?? 0) - subInternal) * 10) / 10,
+      );
+    }
+    project.status = 'unreviewed';
+    await this.projectRepo.save(project);
+
+    if (submission) {
+      submission.status = 'unreviewed';
+      submission.reviewerNote = `[Returned by second-pass review] ${feedback}`;
+      await this.submissionRepo.save(submission);
+    }
+
+    // Internal trace (logged against the super admin, not the user).
+    await this.auditLogService.log(
+      superAdminId,
+      'project_reviewed',
+      `Returned "${project.name}" to the first-review queue for re-review`,
+    );
+    this.logger.log(`Second-pass returned project ${project.id} for re-review`);
+    return { success: true };
+  }
+
+  /** Regular rejection — user-facing changes-needed, no pipes (none granted). */
+  private async reject(
+    project: Project,
+    submission: Submission | null,
+    superAdminId: string,
+    dto: AuditDecisionDto,
+  ): Promise<{ success: true }> {
+    const feedback = (dto.userFeedback ?? '').trim();
+    if (feedback.length < 10) {
+      throw new BadRequestException(
+        'Rejection feedback for the user must be at least 10 characters.',
+      );
+    }
+
+    project.status = 'changes_needed';
+    project.overrideHours = 0;
+    project.internalHours = 0;
+    await this.projectRepo.save(project);
+
+    if (submission && submission.status !== 'changes_needed') {
+      submission.status = 'changes_needed';
+      submission.overrideHours = 0;
+      submission.internalHours = 0;
+      await this.submissionRepo.save(submission);
+    }
+
+    const review = this.reviewRepo.create({
+      projectId: project.id,
+      reviewerId: superAdminId,
+      submissionId: submission?.id ?? null,
+      status: 'changes_needed',
+      feedback,
+      internalNote: 'Rejected at second-pass review',
+      overrideJustification: null,
+    });
+    await this.reviewRepo.save(review);
+
+    await this.auditLogService.log(
+      project.userId,
+      'project_reviewed',
+      `Project "${project.name}" received feedback`,
+    );
+    this.logger.log(`Second-pass rejected project ${project.id}`);
+    return { success: true };
+  }
+}
