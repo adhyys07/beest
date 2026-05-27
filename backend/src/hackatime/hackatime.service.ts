@@ -1,5 +1,6 @@
 import { ForbiddenException, Injectable, Logger, OnModuleInit } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
+import { Cron } from '@nestjs/schedule';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { createHmac, timingSafeEqual } from 'crypto';
@@ -9,6 +10,21 @@ import { User } from '../entities/user.entity';
 import { Session } from '../entities/session.entity';
 import { AuditLogService } from '../audit-log/audit-log.service';
 import { RsvpService } from '../rsvp/rsvp.service';
+
+type OwnershipLookups =
+  | {
+      ok: true;
+      emailOwnerId: string | null;
+      linkedTrustLevel: string | null;
+      linkedBanned: boolean;
+      linkedEmails: string[];
+    }
+  | { ok: false; reason: string };
+
+type OwnershipVerdict =
+  | { kind: 'pass'; reason: string }
+  | { kind: 'ban'; reason: string }
+  | { kind: 'inconclusive' };
 
 @Injectable()
 export class HackatimeService implements OnModuleInit {
@@ -239,8 +255,67 @@ export class HackatimeService implements OnModuleInit {
     }
 
     const storedId = String(user.hackatimeUserId);
+    const lookups = await this.fetchOwnershipLookups(user.email, storedId, hcaSub);
+    if (!lookups.ok) {
+      // Transient API issue — fail open, matches existing behavior.
+      this.logger.warn(
+        `Hackatime ownership check: ${lookups.reason} for ${hcaSub} — failing open`,
+      );
+      return;
+    }
 
-    // 1. Resolve the Hackatime user ID that currently owns the Beest email.
+    const verdict = this.evaluateOwnership(user.email, storedId, lookups);
+
+    if (verdict.kind === 'ban') {
+      this.logger.warn(
+        `Hackatime ownership check FAILED for ${hcaSub}: storedId=${storedId} emailOwnerId=${lookups.emailOwnerId} linkedTrust=${lookups.linkedTrustLevel} linkedBanned=${lookups.linkedBanned} linkedEmailsCount=${lookups.linkedEmails.length}`,
+      );
+
+      await this.auditLogService.log(
+        user.id,
+        'hackatime_ownership_failed',
+        verdict.reason,
+      );
+
+      // Hard-ban: flip Airtable perms to Banned and nuke sessions, matching
+      // the handleCallback red-trust flow.
+      try {
+        await this.rsvpService.updatePerms(user.email, 'Banned');
+      } catch (err) {
+        this.logger.error(
+          `Failed to flip perms to Banned for ${hcaSub}: ${err}`,
+        );
+      }
+      try {
+        await this.sessionRepo.delete({ userId: user.id });
+      } catch (err) {
+        this.logger.error(`Failed to revoke sessions for ${hcaSub}: ${err}`);
+      }
+
+      throw new ForbiddenException(
+        'Your linked Hackatime account does not match your Beest account. Please reconnect Hackatime with the correct account.',
+      );
+    }
+
+    if (verdict.kind === 'inconclusive') {
+      this.logger.warn(
+        `Hackatime ownership check: no positive proof for ${hcaSub} (storedId=${storedId}, emailOwnerId=${lookups.emailOwnerId}, linkedEmailsCount=${lookups.linkedEmails.length}) — failing open`,
+      );
+    }
+  }
+
+  /**
+   * Fetches both Hackatime admin lookups needed to evaluate ownership.
+   * Returns `{ ok: false }` on transient API errors so callers can decide
+   * whether to fail open (the live check does) or skip (the recovery cron does).
+   * A 404 from `get_user_by_email` is a definitive result, not an error — it
+   * means no Hackatime user has that email as their primary.
+   */
+  private async fetchOwnershipLookups(
+    email: string,
+    storedId: string,
+    hcaSub: string,
+  ): Promise<OwnershipLookups> {
     let emailOwnerId: string | null = null;
     try {
       const res = await fetchWithTimeout(
@@ -251,7 +326,7 @@ export class HackatimeService implements OnModuleInit {
             Authorization: `Bearer ${this.adminApiKey}`,
             'Content-Type': 'application/json',
           },
-          body: JSON.stringify({ email: user.email }),
+          body: JSON.stringify({ email }),
         },
       );
       if (res.ok) {
@@ -261,19 +336,12 @@ export class HackatimeService implements OnModuleInit {
           emailOwnerId = String(rawId);
         }
       } else if (res.status !== 404) {
-        this.logger.warn(
-          `Hackatime ownership check: get_user_by_email returned ${res.status} for ${hcaSub} — failing open`,
-        );
-        return;
+        return { ok: false, reason: `get_user_by_email returned ${res.status}` };
       }
     } catch (err) {
-      this.logger.warn(
-        `Hackatime ownership check network error for ${hcaSub}: ${err} — failing open`,
-      );
-      return;
+      return { ok: false, reason: `get_user_by_email network error: ${err}` };
     }
 
-    // 2. Pull info on the stored ID so we can also re-check trust/ban state.
     let linkedTrustLevel: string | null = null;
     let linkedBanned = false;
     let linkedEmails: string[] = [];
@@ -301,48 +369,172 @@ export class HackatimeService implements OnModuleInit {
       );
     }
 
-    const ownEmail = user.email.toLowerCase();
-    const idsMatch = emailOwnerId !== null && emailOwnerId === storedId;
-    const emailOnLinkedAccount =
-      linkedEmails.length === 0 || linkedEmails.includes(ownEmail);
+    return { ok: true, emailOwnerId, linkedTrustLevel, linkedBanned, linkedEmails };
+  }
+
+  /**
+   * Pure decision function. Maps the Hackatime lookups to one of:
+   *   - `pass`: positive proof of ownership found
+   *   - `ban`:  a contradiction or active negative (trust/banned, lookup-mismatch, email-not-on-account)
+   *   - `inconclusive`: no positive proof, no contradiction — caller decides what to do
+   *
+   * The two positive-proof paths matter:
+   *   1. `get_user_by_email(email)` returns the stored id (direct match)
+   *   2. The linked account's email list contains the user's email — necessary
+   *      because `get_user_by_email` only matches primary emails, so users
+   *      whose Beest email is a secondary on Hackatime would otherwise look
+   *      mismatched.
+   */
+  private evaluateOwnership(
+    email: string,
+    storedId: string,
+    lookups: Extract<OwnershipLookups, { ok: true }>,
+  ): OwnershipVerdict {
+    const ownEmail = email.toLowerCase();
+    const { emailOwnerId, linkedEmails, linkedBanned, linkedTrustLevel } = lookups;
+
+    const lookupContradicts =
+      emailOwnerId !== null && emailOwnerId !== storedId;
+    const linkedEmailsContradict =
+      linkedEmails.length > 0 && !linkedEmails.includes(ownEmail);
     const trustBad = linkedTrustLevel === 'red' || linkedBanned;
 
-    if (!idsMatch || !emailOnLinkedAccount || trustBad) {
-      this.logger.warn(
-        `Hackatime ownership check FAILED for ${hcaSub}: storedId=${storedId} emailOwnerId=${emailOwnerId} linkedTrust=${linkedTrustLevel} linkedBanned=${linkedBanned} emailOnLinked=${emailOnLinkedAccount}`,
-      );
+    if (lookupContradicts) {
+      return {
+        kind: 'ban',
+        reason: `Hackatime ID mismatch (stored=${storedId}, expected=${emailOwnerId})`,
+      };
+    }
+    if (linkedEmailsContradict) {
+      return {
+        kind: 'ban',
+        reason: 'Linked Hackatime account does not contain your email',
+      };
+    }
+    if (trustBad) {
+      return {
+        kind: 'ban',
+        reason: `Linked Hackatime account is banned (trust=${linkedTrustLevel}, banned=${linkedBanned})`,
+      };
+    }
 
-      const reason = !idsMatch
-        ? `Hackatime ID mismatch (stored=${storedId}, expected=${emailOwnerId ?? 'none'})`
-        : !emailOnLinkedAccount
-          ? `Linked Hackatime account does not contain your email`
-          : `Linked Hackatime account is banned (trust=${linkedTrustLevel}, banned=${linkedBanned})`;
+    const idsMatchByLookup =
+      emailOwnerId !== null && emailOwnerId === storedId;
+    const idsMatchByLinkedEmails = linkedEmails.includes(ownEmail);
+    if (idsMatchByLookup || idsMatchByLinkedEmails) {
+      return {
+        kind: 'pass',
+        reason: idsMatchByLookup
+          ? 'by-email lookup confirms stored id'
+          : 'linked account lists user email',
+      };
+    }
 
-      await this.auditLogService.log(
-        user.id,
-        'hackatime_ownership_failed',
-        reason,
-      );
+    return { kind: 'inconclusive' };
+  }
 
-      // Hard-ban: flip Airtable perms to Banned and nuke sessions, matching
-      // the handleCallback red-trust flow.
+  /**
+   * Daily sweep: re-checks every user whose `hackatime_ownership_failed`
+   * audit log indicates the linked Hackatime account was banned or red-trust
+   * at ban-time. If Hackatime has since cleared the account AND the rest of
+   * the ownership check now passes, clear their Airtable `Perms` so they can
+   * sign back in.
+   *
+   * Scope is deliberately narrow: only the two failure reasons that can
+   * recover on Hackatime's side are polled. Lookup contradictions and
+   * missing-email failures need a human to fix the underlying Hackatime
+   * state, so we don't auto-poll them.
+   *
+   * Gated on NODE_ENV === 'production' so it doesn't fire in dev where the
+   * .env may point at prod Airtable.
+   */
+  @Cron('0 4 * * *', { name: 'hackatime-ownership-recovery' })
+  async dailyOwnershipRecoverySweep(): Promise<void> {
+    if (process.env.NODE_ENV !== 'production') {
+      this.logger.log('Skipping hackatime-ownership-recovery cron (NODE_ENV != production)');
+      return;
+    }
+    if (!this.adminApiKey) {
+      this.logger.warn('Skipping hackatime-ownership-recovery cron — admin key not set');
+      return;
+    }
+
+    this.logger.log('hackatime-ownership-recovery cron starting');
+    const candidateUserIds =
+      await this.auditLogService.findUsersWithOwnershipFailLabels([
+        'banned=true',
+        'trust=red',
+      ]);
+    this.logger.log(
+      `hackatime-ownership-recovery: ${candidateUserIds.length} candidate(s)`,
+    );
+
+    let reverted = 0;
+    let stillBad = 0;
+    let notBanned = 0;
+    let skipped = 0;
+
+    for (const userId of candidateUserIds) {
+      const user = await this.userRepo.findOne({ where: { id: userId } });
+      if (!user || !user.email || !user.hackatimeUserId) {
+        skipped += 1;
+        continue;
+      }
+
+      let currentPerms: string | null;
       try {
-        await this.rsvpService.updatePerms(user.email, 'Banned');
+        currentPerms = await this.rsvpService.getPerms(user.email);
+      } catch (err) {
+        this.logger.warn(
+          `hackatime-ownership-recovery: getPerms failed for ${user.id}: ${err}`,
+        );
+        skipped += 1;
+        continue;
+      }
+      if (currentPerms !== 'Banned') {
+        notBanned += 1;
+        continue;
+      }
+
+      const storedId = String(user.hackatimeUserId);
+      const lookups = await this.fetchOwnershipLookups(
+        user.email,
+        storedId,
+        user.hcaSub,
+      );
+      if (!lookups.ok) {
+        skipped += 1;
+        continue;
+      }
+
+      const verdict = this.evaluateOwnership(user.email, storedId, lookups);
+      if (verdict.kind !== 'pass') {
+        stillBad += 1;
+        continue;
+      }
+
+      try {
+        await this.rsvpService.clearPerms(user.email);
+        await this.auditLogService.log(
+          user.id,
+          'ban_reverted',
+          `Hackatime account recovered: ${verdict.reason}`,
+        );
+        reverted += 1;
+        this.logger.log(
+          `hackatime-ownership-recovery: reverted ban for ${user.id} (${verdict.reason})`,
+        );
       } catch (err) {
         this.logger.error(
-          `Failed to flip perms to Banned for ${hcaSub}: ${err}`,
+          `hackatime-ownership-recovery: revert failed for ${user.id}: ${err}`,
         );
+        skipped += 1;
       }
-      try {
-        await this.sessionRepo.delete({ userId: user.id });
-      } catch (err) {
-        this.logger.error(`Failed to revoke sessions for ${hcaSub}: ${err}`);
-      }
-
-      throw new ForbiddenException(
-        'Your linked Hackatime account does not match your Beest account. Please reconnect Hackatime with the correct account.',
-      );
     }
+
+    this.logger.log(
+      `hackatime-ownership-recovery done: reverted=${reverted} stillBad=${stillBad} notBanned=${notBanned} skipped=${skipped}`,
+    );
   }
 
   /**

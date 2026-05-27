@@ -28,4 +28,24 @@ export class AuditLogService {
       select: ['id', 'action', 'label', 'createdAt'],
     });
   }
+
+  /**
+   * Returns distinct user IDs with at least one `hackatime_ownership_failed`
+   * audit log whose label contains any of `labelSubstrings`. Used by the
+   * daily Hackatime-recovery cron to find candidates whose linked account
+   * was originally flagged as banned/red-trust.
+   */
+  async findUsersWithOwnershipFailLabels(labelSubstrings: string[]): Promise<string[]> {
+    if (labelSubstrings.length === 0) return [];
+    const qb = this.auditLogRepo
+      .createQueryBuilder('a')
+      .select('DISTINCT a.user_id', 'user_id')
+      .where("a.action = 'hackatime_ownership_failed'");
+    qb.andWhere(
+      `(${labelSubstrings.map((_, i) => `a.label LIKE :s${i}`).join(' OR ')})`,
+      Object.fromEntries(labelSubstrings.map((s, i) => [`s${i}`, `%${s}%`])),
+    );
+    const rows = await qb.getRawMany<{ user_id: string }>();
+    return rows.map((r) => r.user_id);
+  }
 }

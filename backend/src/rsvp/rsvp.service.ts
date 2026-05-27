@@ -128,6 +128,11 @@ export class RsvpService {
     }
   }
 
+  /** Clears the Perms field. Pairs with getPerms() — `null` perms ≠ Banned. */
+  async clearPerms(rawEmail: string): Promise<void> {
+    await this.updatePerms(rawEmail, '');
+  }
+
   async getPerms(rawEmail: string): Promise<string | null> {
     const email = this.sanitizeEmail(rawEmail);
     const searchParams = new URLSearchParams({
