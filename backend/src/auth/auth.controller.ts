@@ -150,6 +150,7 @@ export class AuthController {
     const scopeRequirements: Record<string, string[]> = {
       admin: ['Super Admin'],
       reviewer: ['Super Admin', 'Reviewer', 'Fraud Reviewer'],
+      audit: ['Super Admin', 'Fraud Reviewer'],
     };
 
     const allowed = scopeRequirements[scope];
