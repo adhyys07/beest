@@ -5,13 +5,13 @@ import type { PageServerLoad } from './$types';
 
 const BACKEND_URL = env.BACKEND_URL ?? 'http://localhost:3001';
 
-// Second-pass review is SUPER ADMIN only.
+// Second-pass review is open to Super Admin and Fraud Reviewer.
 export const load: PageServerLoad = async ({ cookies }) => {
 	const user = await getAuthenticatedUser(cookies);
 	if (!user) redirect(302, '/');
 
 	const token = cookies.get('auth_token');
-	const adminRes = await fetch(`${BACKEND_URL}/api/auth/scope?scope=admin`, {
+	const adminRes = await fetch(`${BACKEND_URL}/api/auth/scope?scope=audit`, {
 		headers: { Authorization: `Bearer ${token}` }
 	});
 	if (!adminRes.ok) redirect(302, '/home');
