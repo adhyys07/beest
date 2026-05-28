@@ -35,6 +35,7 @@
 
 	const isReviewer = $derived(data.role === 'Reviewer' || data.role === 'Fraud Reviewer');
 	const isSuperAdmin = $derived(data.role === 'Super Admin');
+	const canBan = $derived(data.role === 'Super Admin' || data.role === 'Fraud Reviewer');
 	let activeTab = $state('users');
 	let users: UserSummary[] = $state([]);
 	let loading = $state(true);
@@ -1878,7 +1879,7 @@
 									<div class="review-actions">
 										<button class="review-btn review-btn-approve" onclick={() => reviewProject('approved')} disabled={reviewSubmitting || !justificationOk}>Approve</button>
 										<button class="review-btn review-btn-reject" onclick={() => reviewProject('changes_needed')} disabled={reviewSubmitting || !userFeedback.trim()}>Reject</button>
-										<button class="review-btn review-btn-ban" onclick={() => { if (confirm('Ban this user and reject their project?')) reviewProject('ban'); }} disabled={reviewSubmitting || !isSuperAdmin} title={!isSuperAdmin ? 'Ban is Super Admin only — flag in internal note and ping Euan' : ''}>Fail &amp; Ban</button>
+										<button class="review-btn review-btn-ban" onclick={() => { if (confirm('Ban this user and reject their project?')) reviewProject('ban'); }} disabled={reviewSubmitting || !canBan} title={!canBan ? 'Ban requires Super Admin or Fraud Reviewer — flag in internal note and ping Euan' : ''}>Fail &amp; Ban</button>
 									</div>
 								{/if}
 
