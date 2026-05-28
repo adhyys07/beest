@@ -523,20 +523,20 @@
 							{/if}
 
 							<div class="pipe-preview">
-								<div class="pipe-preview-title">Pipe math preview</div>
+								<div class="pipe-preview-title">Pipe math preview <span class="muted">— driven by user-facing hours, NOT internal hours</span></div>
 								{#if isResubmission}
 									{#if priorCumulative != null && submissionDelta != null && submissionDelta > 0}
 										<div class="pipe-row"><span class="pipe-k">Prior cumulative</span><span class="pipe-v">{priorCumulative}h</span></div>
 										<div class="pipe-row"><span class="pipe-k">First-pass delta this submission</span><span class="pipe-v">+{submissionDelta}h</span></div>
 									{/if}
-									<div class="pipe-row"><span class="pipe-k">Cumulative you're setting</span><span class="pipe-v">{effectiveApproveHours}h</span></div>
+									<div class="pipe-row"><span class="pipe-k">User-facing hours you're setting</span><span class="pipe-v">{effectiveApproveHours}h</span></div>
 									<div class="pipe-row"><span class="pipe-k">Pipes already paid on this project</span><span class="pipe-v">{pipesAlreadyPaid}</span></div>
-									<div class="pipe-row pipe-result"><span class="pipe-k">New pipes from this approval</span><span class="pipe-v">+{previewNewPipes}</span></div>
+									<div class="pipe-row pipe-result"><span class="pipe-k">New pipes from this approval</span><span class="pipe-v">floor({effectiveApproveHours}) − {pipesAlreadyPaid} = +{previewNewPipes}</span></div>
 								{:else}
-									<div class="pipe-row"><span class="pipe-k">Cumulative you're setting</span><span class="pipe-v">{effectiveApproveHours}h</span></div>
-									<div class="pipe-row pipe-result"><span class="pipe-k">New pipes from this approval</span><span class="pipe-v">+{previewNewPipes}</span></div>
+									<div class="pipe-row"><span class="pipe-k">User-facing hours you're setting</span><span class="pipe-v">{effectiveApproveHours}h</span></div>
+									<div class="pipe-row pipe-result"><span class="pipe-k">New pipes from this approval</span><span class="pipe-v">floor({effectiveApproveHours}) = +{previewNewPipes}</span></div>
 								{/if}
-								<p class="pipe-note">Backend grants <code>floor(sum of override_hours) − sum(pipes_granted)</code> across all the user's projects, so cross-project fractional remainders can shift the actual grant by ±1 pipe.</p>
+								<p class="pipe-note">Internal hours go only to Airtable's "Override Hours Spent" field — they don't affect pipes. Backend grants <code>floor(sum of override_hours) − sum(pipes_granted)</code> across all the user's projects, so cross-project fractional remainders can shift the actual grant by ±1 pipe.</p>
 							</div>
 
 							<button class="btn approve" disabled={approveDisabled} onclick={submit}>
