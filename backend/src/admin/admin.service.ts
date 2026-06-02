@@ -16,6 +16,7 @@ import { ProjectReview } from '../entities/project-review.entity';
 import { ShopItem } from '../entities/shop-item.entity';
 import { Order } from '../entities/order.entity';
 import { Submission } from '../entities/submission.entity';
+import { Event } from '../entities/event.entity';
 import { RsvpService } from '../rsvp/rsvp.service';
 import { AuditLogService } from '../audit-log/audit-log.service';
 import { HcaService } from '../hca/hca.service';
@@ -85,6 +86,7 @@ export class AdminService {
     @InjectRepository(ShopItem) private readonly shopRepo: Repository<ShopItem>,
     @InjectRepository(Order) private readonly orderRepo: Repository<Order>,
     @InjectRepository(Submission) private readonly submissionRepo: Repository<Submission>,
+    @InjectRepository(Event) private readonly eventRepo: Repository<Event>,
     private readonly rsvpService: RsvpService,
     private readonly auditLogService: AuditLogService,
     private readonly hcaService: HcaService,
@@ -172,6 +174,103 @@ export class AdminService {
       activeSessions: sessions,
       auditLogs,
     };
+  }
+
+  async listEvents() {
+    return this.eventRepo.find({ order: { startAt: 'ASC', title: 'ASC' } });
+  }
+
+  async listUpcomingEvents() {
+    const now = new Date();
+    return this.eventRepo
+      .createQueryBuilder('event')
+      .where('event.end_at IS NULL OR event.end_at >= :now', { now: now.toISOString() })
+      .orderBy('event.start_at', 'ASC')
+      .getMany();
+  }
+
+  async createEvent(body: {
+    title?: string;
+    description?: string | null;
+    startAt?: string;
+    endAt?: string | null;
+    url?: string | null;
+  }) {
+    const title = (body.title ?? '').trim();
+    const startAt = body.startAt ? new Date(body.startAt) : null;
+    const endAt = body.endAt ? new Date(body.endAt) : null;
+
+    if (!title) {
+      throw new BadRequestException('title is required');
+    }
+    if (!startAt || Number.isNaN(startAt.getTime())) {
+      throw new BadRequestException('startAt is required and must be a valid datetime');
+    }
+    if (endAt && Number.isNaN(endAt.getTime())) {
+      throw new BadRequestException('endAt must be a valid datetime');
+    }
+    if (endAt && endAt < startAt) {
+      throw new BadRequestException('endAt must be the same or after startAt');
+    }
+
+    const event = this.eventRepo.create({
+      title,
+      description: body.description?.trim() || null,
+      startAt,
+      endAt: endAt || null,
+      url: body.url?.trim() || null,
+    });
+    return this.eventRepo.save(event);
+  }
+
+  async updateEvent(id: string, body: {
+    title?: string;
+    description?: string | null;
+    startAt?: string;
+    endAt?: string | null;
+    url?: string | null;
+  }) {
+    const event = await this.eventRepo.findOne({ where: { id } });
+    if (!event) {
+      throw new NotFoundException('Event not found');
+    }
+
+    if (body.title !== undefined) {
+      event.title = body.title.trim() || event.title;
+    }
+    if (body.description !== undefined) {
+      event.description = body.description?.trim() || null;
+    }
+    if (body.url !== undefined) {
+      event.url = body.url?.trim() || null;
+    }
+    if (body.startAt !== undefined) {
+      const startAt = new Date(body.startAt);
+      if (Number.isNaN(startAt.getTime())) {
+        throw new BadRequestException('startAt must be a valid datetime');
+      }
+      event.startAt = startAt;
+    }
+    if (body.endAt !== undefined) {
+      const endAt = body.endAt ? new Date(body.endAt) : null;
+      if (body.endAt && Number.isNaN(endAt?.getTime())) {
+        throw new BadRequestException('endAt must be a valid datetime');
+      }
+      event.endAt = endAt;
+    }
+    if (event.endAt && event.endAt < event.startAt) {
+      throw new BadRequestException('endAt must be the same or after startAt');
+    }
+
+    return this.eventRepo.save(event);
+  }
+
+  async deleteEvent(id: string) {
+    const result = await this.eventRepo.delete({ id });
+    if (result.affected === 0) {
+      throw new NotFoundException('Event not found');
+    }
+    return { success: true };
   }
 
   async banUser(userId: string, adminId?: string): Promise<void> {
