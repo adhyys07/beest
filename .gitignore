@@ -29,3 +29,7 @@ CLAUDE.md
 # Dev-server stdout captures
 *-dev.log
 *.log
+
+# One-off / local scripts
+/scripts/
+backend/scripts/
