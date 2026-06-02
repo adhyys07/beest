@@ -16,6 +16,7 @@
 <script lang="ts">
   import { onMount } from 'svelte';
   import confetti from 'canvas-confetti';
+  import { formatLocal } from '$lib/utils/formatDate';
 
   // Portal action: moves a node to document.body so its position:fixed
   // escapes any ancestor containing-block (.main has filter: saturate which
@@ -31,6 +32,7 @@
   }
 
   let { data } = $props();
+  const initialEvents = data.events ?? [];
 
   let activeSection = $state('projects');
   let tileLoaded = $state(false);
@@ -66,6 +68,7 @@
   let formError = $state('');
   let auditLog = $state<{ action: string; label: string; createdAt: string }[]>([]);
   let newsItems = $state<{ id: string; text: string; displayDate: string }[]>([]);
+  let eventItems = $state<{ id: string; title: string; description: string | null; startAt: string; endAt: string | null; location: string | null; url: string | null }[]>(initialEvents);
   let leaderboard = $state<{ name: string; hours: number }[]>([]);
   let leaderboardLoading = $state(true);
   let leaderboardTotal = $state(0);
@@ -1005,6 +1008,7 @@
   const navItems = [
     { id: 'projects', label: 'Projects', mobile: true },
     { id: 'shop', label: 'Shop', mobile: true },
+    { id: 'events', label: 'Events', mobile: true },
     { id: 'explore', label: 'Explore', mobile: true },
     { id: 'leaderboard', label: 'Leaderboard', mobile: false },
     { id: 'faq', label: 'FAQ', mobile: false },
@@ -1386,7 +1390,7 @@
                   {#if review.reviewerName}
                     <span class="review-feedback-reviewer">by {review.reviewerName}</span>
                   {/if}
-                  <span class="review-feedback-date">{new Date(review.createdAt).toLocaleDateString()}</span>
+                  <span class="review-feedback-date">{formatLocal(review.createdAt, { year: 'numeric', month: 'short', day: 'numeric' })}</span>
                 </div>
                 {#if review.feedback}
                   <p class="review-feedback-text">{review.feedback}</p>
@@ -1469,7 +1473,7 @@
                 {#if review.reviewerName}
                   <span class="review-feedback-reviewer">by {review.reviewerName}</span>
                 {/if}
-                <span class="review-feedback-date">{new Date(review.createdAt).toLocaleDateString()}</span>
+                <span class="review-feedback-date">{formatLocal(review.createdAt, { year: 'numeric', month: 'short', day: 'numeric' })}</span>
               </div>
               {#if review.feedback}
                 <p class="review-feedback-text">{review.feedback}</p>
@@ -1707,6 +1711,40 @@
         <g fill="#6c6659"><circle cx="50" cy="50" r="30"/>{#each Array(8) as _, t (t)}<rect x="43" y="4" width="14" height="22" rx="3" transform="rotate({t*45} 50 50)"/>{/each}</g><circle cx="50" cy="50" r="12" fill="#635a4e"/>
       </svg>
     </div>
+    {/if}
+
+    {#if activeSection === 'events'}
+    <section class="section section-events">
+      <div class="section-inner">
+        <h2 class="section-title">Upcoming Events</h2>
+        {#if eventItems.length === 0}
+          <p class="section-copy">No upcoming events are scheduled yet.</p>
+        {:else}
+          <div class="events-grid">
+            {#each eventItems as event}
+              <article class="event-card">
+                <div class="event-card-meta">
+                  <time datetime={event.startAt}>{formatLocal(event.startAt)}</time>
+                  {#if event.endAt}
+                    <span>— {formatLocal(event.endAt)}</span>
+                  {/if}
+                </div>
+                <h3>{event.title}</h3>
+                {#if event.location}
+                  <p class="event-location">{event.location}</p>
+                {/if}
+                {#if event.description}
+                  <p>{event.description}</p>
+                {/if}
+                {#if event.url}
+                  <p><a href={event.url} target="_blank" rel="noopener noreferrer">Event details</a></p>
+                {/if}
+              </article>
+            {/each}
+          </div>
+        {/if}
+      </div>
+    </section>
     {/if}
 
     {#if showShippingPrompt && shippingCheck}
@@ -2524,7 +2562,7 @@
               <article class="devlog-card">
                 <header class="devlog-card-header">
                   <span class="devlog-card-project">{devlogProjectName(dl.projectId) ?? 'Project removed'}</span>
-                  <span class="devlog-card-time">{new Date(dl.createdAt).toLocaleString()}</span>
+                  <span class="devlog-card-time">{formatLocal(dl.createdAt)}</span>
                   <button class="devlog-card-delete" onclick={() => deleteDevlog(dl.id)} title="Delete devlog">×</button>
                 </header>
                 <h3 class="devlog-card-title">{dl.title}</h3>
@@ -3149,6 +3187,49 @@
     font-size: clamp(14px, 1.2vw, 17px);
     color: #cbc1ae;
     letter-spacing: 0.02em;
+  }
+
+  .section-events {
+    margin-bottom: 48px;
+  }
+
+  .events-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+    gap: 20px;
+  }
+
+  .event-card {
+    padding: 24px;
+    border-radius: 24px;
+    background: rgba(255, 255, 255, 0.05);
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    box-shadow: 0 18px 45px rgba(0, 0, 0, 0.1);
+  }
+
+  .event-card h3 {
+    margin: 0 0 10px;
+    font-size: 1.25rem;
+  }
+
+  .event-card-meta {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 10px;
+    margin-bottom: 16px;
+    color: #c8d8ea;
+    font-size: 0.95rem;
+  }
+
+  .event-location {
+    margin: 0 0 12px;
+    color: #e6f4fe;
+    font-weight: 600;
+  }
+
+  .event-card a {
+    color: #93b4cd;
+    text-decoration: underline;
   }
 
   /* ── bottom row ───────────────────────────────────── */

@@ -58,6 +58,39 @@
 	let newNewsDate = $state('');
 	let newsSaving = $state(false);
 
+	// Events state
+	interface AdminEvent {
+		id: string;
+		title: string;
+		description: string | null;
+		startAt: string;
+		endAt: string | null;
+		url: string | null;
+	}
+	let eventItems: AdminEvent[] = $state([]);
+	let eventsLoading = $state(false);
+	let editingEvent: AdminEvent | null = $state(null);
+	let newEventTitle = $state('');
+	let newEventDescription = $state('');
+	let newEventStartAt = $state('');
+	let newEventEndAt = $state('');
+	let newEventUrl = $state('');
+	let eventSaving = $state(false);
+
+	function toEventApiDate(value: string) {
+		if (!value) return null;
+		const date = new Date(value);
+		return Number.isNaN(date.getTime()) ? null : date.toISOString();
+	}
+
+	function toDateTimeLocalValue(value: string | null) {
+		if (!value) return '';
+		const date = new Date(value);
+		if (Number.isNaN(date.getTime())) return '';
+		const offsetDate = new Date(date.getTime() - date.getTimezoneOffset() * 60_000);
+		return offsetDate.toISOString().slice(0, 16);
+	}
+
 	// Projects state
 	interface ProjectSummary {
 		id: string;
@@ -572,6 +605,98 @@
 		}
 	}
 
+	async function loadEvents() {
+		eventsLoading = true;
+		try {
+			const res = await fetch('/api/admin/events');
+			if (res.ok) eventItems = await res.json();
+		} finally {
+			eventsLoading = false;
+		}
+	}
+
+	function resetEventForm() {
+		editingEvent = null;
+		newEventTitle = '';
+		newEventDescription = '';
+		newEventStartAt = '';
+		newEventEndAt = '';
+		newEventUrl = '';
+	}
+
+	async function createEvent() {
+		const startAt = toEventApiDate(newEventStartAt);
+		const endAt = toEventApiDate(newEventEndAt);
+		if (!newEventTitle.trim() || !startAt) return;
+		eventSaving = true;
+		try {
+			const res = await fetch('/api/admin/events', {
+				method: 'POST',
+				headers: { 'Content-Type': 'application/json' },
+				body: JSON.stringify({
+					title: newEventTitle,
+					description: newEventDescription,
+					startAt,
+					endAt,
+					url: newEventUrl,
+				}),
+			});
+			if (res.ok) {
+				resetEventForm();
+				await loadEvents();
+			}
+		} finally {
+			eventSaving = false;
+		}
+	}
+
+	async function saveEventEdit() {
+		if (!editingEvent) return;
+		const startAt = toEventApiDate(newEventStartAt);
+		const endAt = toEventApiDate(newEventEndAt);
+		if (!newEventTitle.trim() || !startAt) return;
+		eventSaving = true;
+		try {
+			const res = await fetch(`/api/admin/events/${editingEvent.id}`, {
+				method: 'PATCH',
+				headers: { 'Content-Type': 'application/json' },
+				body: JSON.stringify({
+					title: newEventTitle,
+					description: newEventDescription,
+					startAt,
+					endAt,
+					url: newEventUrl,
+				}),
+			});
+			if (res.ok) {
+				editingEvent = null;
+				await loadEvents();
+			}
+		} finally {
+			eventSaving = false;
+		}
+	}
+
+	async function deleteEvent(id: string) {
+		if (!confirm('Delete this event?')) return;
+		eventSaving = true;
+		try {
+			const res = await fetch(`/api/admin/events/${id}`, { method: 'DELETE' });
+			if (res.ok) await loadEvents();
+		} finally {
+			eventSaving = false;
+		}
+	}
+
+	function editEvent(eventItem: AdminEvent) {
+		editingEvent = { ...eventItem };
+		newEventTitle = eventItem.title;
+		newEventDescription = eventItem.description ?? '';
+		newEventStartAt = toDateTimeLocalValue(eventItem.startAt);
+		newEventEndAt = toDateTimeLocalValue(eventItem.endAt);
+		newEventUrl = eventItem.url ?? '';
+	}
+
 	async function loadProjects() {
 		projectsLoading = true;
 		try {
@@ -980,6 +1105,7 @@
 		if (activeTab === 'users') { loadUsers(); }
 		if (activeTab === 'stats') { loadUsers(); if (isSuperAdmin) loadUnreviewedHours(); }
 		if (activeTab === 'news') loadNews();
+		if (activeTab === 'events') loadEvents();
 		if (activeTab === 'projects') loadProjects();
 		if (activeTab === 'shop') loadShop();
 		if (activeTab === 'fulfillment') { loadFulfillment(); loadHcbStatus(); }
@@ -1001,6 +1127,9 @@
 			<button class="tab" class:active={activeTab === 'users'} onclick={() => { activeTab = 'users'; closeDetail(); }}>Users</button>
 			<button class="tab" class:active={activeTab === 'stats'} onclick={() => activeTab = 'stats'}>Stats</button>
 			<button class="tab" class:active={activeTab === 'news'} onclick={() => activeTab = 'news'}>News</button>
+			{#if isSuperAdmin}
+				<button class="tab" class:active={activeTab === 'events'} onclick={() => activeTab = 'events'}>Events</button>
+			{/if}
 			<button class="tab" class:active={activeTab === 'shop'} onclick={() => activeTab = 'shop'}>Shop</button>
 			<button class="tab" class:active={activeTab === 'fulfillment'} onclick={() => activeTab = 'fulfillment'}>Fulfillment</button>
 		{/if}
@@ -1340,13 +1469,68 @@
 											<button class="btn btn-delete" onclick={() => deleteNews(item.id)} disabled={newsSaving}>Delete</button>
 										</td>
 									{/if}
-								</tr>
-							{/each}
-						</tbody>
-					</table>
-				{/if}
+							</tr>
+						{/each}
+					</tbody>
+				</table>
+			{/if}
+		</div>
+	{:else if activeTab === 'events'}
+		<div class="events-admin">
+			<div class="news-form">
+				<h3>{editingEvent ? 'Edit Event' : 'Add Event'}</h3>
+				<div class="news-form-fields">
+					<input type="text" placeholder="Title" bind:value={newEventTitle} class="news-input" />
+					<textarea placeholder="Description" bind:value={newEventDescription} class="news-input news-input-text" rows="2"></textarea>
+					<div class="news-date-row">
+						<label for="event-start-at">Start</label>
+						<input id="event-start-at" type="datetime-local" bind:value={newEventStartAt} class="news-input news-input-date" />
+					</div>
+					<div class="news-date-row">
+						<label for="event-end-at">End</label>
+						<input id="event-end-at" type="datetime-local" bind:value={newEventEndAt} class="news-input news-input-date" />
+					</div>
+					<input type="url" placeholder="URL (optional)" bind:value={newEventUrl} class="news-input" />
+					<div class="news-form-actions">
+						<button class="btn btn-add-news" onclick={editingEvent ? saveEventEdit : createEvent} disabled={eventSaving || !newEventTitle.trim() || !newEventStartAt.trim()}>
+							{eventSaving ? 'Saving...' : editingEvent ? 'Save Event' : 'Add Event'}
+						</button>
+						{#if editingEvent}
+							<button class="btn btn-cancel" onclick={resetEventForm} disabled={eventSaving}>Cancel</button>
+						{/if}
+					</div>
+				</div>
 			</div>
-		{:else if activeTab === 'fulfillment'}
+
+			{#if eventsLoading}
+				<p class="loading">Loading events...</p>
+			{:else if eventItems.length === 0}
+				<p class="empty">No events yet.</p>
+			{:else}
+				<table class="users-table">
+					<thead>
+						<tr>
+							<th>Start</th>
+							<th>Title</th>
+							<th>Actions</th>
+						</tr>
+					</thead>
+					<tbody>
+						{#each eventItems as evt}
+							<tr>
+								<td>{new Date(evt.startAt).toLocaleString()}</td>
+								<td>{evt.title}</td>
+									<td class="news-actions">
+									<button class="btn btn-edit" onclick={() => editEvent(evt)}>Edit</button>
+									<button class="btn btn-delete" onclick={() => deleteEvent(evt.id)} disabled={eventSaving}>Delete</button>
+								</td>
+							</tr>
+						{/each}
+					</tbody>
+				</table>
+			{/if}
+		</div>
+	{:else if activeTab === 'fulfillment'}
 			<div class="fulfillment-admin">
 				{#if hcbStatus}
 					<div class="hcb-banner" class:hcb-ok={hcbStatus.connected} class:hcb-warn={!hcbStatus.connected}>
