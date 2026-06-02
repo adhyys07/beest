@@ -2,6 +2,7 @@
 	import { onMount } from 'svelte';
 	import '@fontsource/opendyslexic/400.css';
 	import ActivityTimelineChart from '$lib/components/audit/ActivityTimelineChart.svelte';
+	import TimelapsePanel from '$lib/components/admin/TimelapsePanel.svelte';
 
 	let { data } = $props<{ data: { role?: string } }>();
 	const isSuperAdmin = $derived(data?.role === 'Super Admin');
@@ -457,6 +458,10 @@
 							</ol>
 						</section>
 					{/if}
+
+					<section class="sec">
+						<TimelapsePanel projectId={current.id} />
+					</section>
 
 					<section class="sec">
 						<h3>Hackatime heartbeats</h3>
