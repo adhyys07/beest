@@ -15,6 +15,8 @@
 
 <script lang="ts">
   import { onMount } from 'svelte';
+  import { goto } from '$app/navigation';
+  import { page } from '$app/state';
   import confetti from 'canvas-confetti';
   import { formatLocal } from '$lib/utils/formatDate';
 
@@ -38,7 +40,31 @@
     return `https://hackclub.enterprise.slack.com/team/${encodeURIComponent(slackId)}`;
   }
 
-  let activeSection = $state('projects');
+  const sectionRoutes: Record<string, string> = {
+    projects: '/projects',
+    shop: '/shop',
+    events: '/events',
+    explore: '/explore',
+    leaderboard: '/leaderboard',
+    faq: '/faq',
+    me: '/me',
+    devlogs: '/devlogs',
+    tutorial: '/tutorial'
+  };
+  const pathSections: Record<string, string> = {
+    '/home': 'projects',
+    '/projects': 'projects',
+    '/shop': 'shop',
+    '/events': 'events',
+    '/explore': 'explore',
+    '/leaderboard': 'leaderboard',
+    '/faq': 'faq',
+    '/me': 'me',
+    '/devlogs': 'devlogs'
+  };
+  const sectionFromPath = (pathname: string) => pathSections[pathname] ?? 'projects';
+
+  let activeSection = $state(sectionFromPath(page.url.pathname));
   let tileLoaded = $state(false);
   let customCursorEnabled = $state(typeof localStorage !== 'undefined' ? localStorage.getItem('customCursor') !== 'off' : true);
   let creatingProject = $state(false);
@@ -1021,13 +1047,18 @@
     { id: 'tutorial', label: 'Tutorial', mobile: false }
   ];
 
-  function navigate(id: string) {
-    if (id === 'tutorial') { window.location.href = '/tutorial'; return; }
-    if (creatingProject || editingProject || reviewProject) resetForm();
-    activeSection = id;
+  function loadSectionData(id: string) {
     if (id === 'shop') { fetchShopItems(); fetchPipes(); fetchUserOrders(); }
     if (id === 'me') { fetchFulfillmentUpdates(); markFulfillmentRead(); }
     if (id === 'devlogs') { fetchDevlogs(); }
+  }
+
+  function navigate(id: string) {
+    if (id === 'tutorial') { goto('/tutorial'); return; }
+    if (creatingProject || editingProject || reviewProject) resetForm();
+    activeSection = id;
+    loadSectionData(id);
+    goto(sectionRoutes[id] ?? '/projects');
   }
 
   async function fetchPipes() {
@@ -1307,6 +1338,16 @@
     fetchStickerLink();
     fetchPipes();
     fetchUnreadCount();
+    loadSectionData(activeSection);
+  });
+
+  $effect(() => {
+    const section = sectionFromPath(page.url.pathname);
+    if (section !== activeSection) {
+      if (creatingProject || editingProject || reviewProject) resetForm();
+      activeSection = section;
+      loadSectionData(section);
+    }
   });
 </script>
 
