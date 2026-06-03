@@ -1339,15 +1339,17 @@
     fetchPipes();
     fetchUnreadCount();
     loadSectionData(activeSection);
-  });
 
-  $effect(() => {
-    const section = sectionFromPath(page.url.pathname);
-    if (section !== activeSection) {
+    const handlePopstate = () => {
+      const section = sectionFromPath(window.location.pathname);
       if (creatingProject || editingProject || reviewProject) resetForm();
       activeSection = section;
       loadSectionData(section);
-    }
+    };
+    window.addEventListener('popstate', handlePopstate);
+    return () => {
+      window.removeEventListener('popstate', handlePopstate);
+    };
   });
 </script>
 
