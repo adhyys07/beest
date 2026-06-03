@@ -176,28 +176,36 @@ export class AdminService {
     };
   }
 
-  private async withEventHosts(events: Event[]): Promise<Array<Event & { hostedByName: string | null }>> {
-    const slackIds = Array.from(
-      new Set(events.map((event) => event.hostedBy).filter((slackId): slackId is string => !!slackId)),
+  private async withEventHosts(events: Event[]): Promise<Array<Event & { hostedByName: string | null; hostedBySlackId: string | null }>> {
+    const hostValues = Array.from(
+      new Set(events.map((event) => event.hostedBy?.trim()).filter((hostedBy): hostedBy is string => !!hostedBy)),
     );
-    if (slackIds.length === 0) {
-      return events.map((event) => ({ ...event, hostedByName: null }));
+    if (hostValues.length === 0) {
+      return events.map((event) => ({ ...event, hostedByName: null, hostedBySlackId: null }));
     }
 
     const hosts = await this.userRepo.find({
-      where: { slackId: In(slackIds) },
+      where: [
+        { slackId: In(hostValues) },
+        { nickname: In(hostValues) },
+        { name: In(hostValues) },
+      ],
       select: ['slackId', 'name', 'nickname', 'email'],
     });
-    const hostNames = new Map(
-      hosts.map((host) => [
-        host.slackId,
-        host.nickname || host.name || host.email || host.slackId,
-      ]),
-    );
+    const hostLookup = new Map<string, { name: string; slackId: string | null }>();
+    for (const host of hosts) {
+      const displayName = host.nickname || host.name || host.email || host.slackId;
+      for (const key of [host.slackId, host.nickname, host.name]) {
+        if (key && !hostLookup.has(key)) {
+          hostLookup.set(key, { name: displayName, slackId: host.slackId ?? null });
+        }
+      }
+    }
 
     return events.map((event) => ({
       ...event,
-      hostedByName: event.hostedBy ? (hostNames.get(event.hostedBy) ?? event.hostedBy) : null,
+      hostedByName: event.hostedBy ? (hostLookup.get(event.hostedBy)?.name ?? event.hostedBy) : null,
+      hostedBySlackId: event.hostedBy ? (hostLookup.get(event.hostedBy)?.slackId ?? null) : null,
     }));
   }
 

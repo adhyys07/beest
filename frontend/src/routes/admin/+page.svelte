@@ -65,6 +65,7 @@
 		description: string | null;
 		hostedBy: string | null;
 		hostedByName: string | null;
+		hostedBySlackId: string | null;
 		startAt: string;
 		endAt: string | null;
 		url: string | null;
@@ -718,7 +719,7 @@
 		editingEvent = { ...eventItem };
 		newEventTitle = eventItem.title;
 		newEventDescription = eventItem.description ?? '';
-		newEventHostedBy = eventItem.hostedBy ?? '';
+		newEventHostedBy = eventItem.hostedBySlackId ?? eventItem.hostedBy ?? '';
 		newEventStartAt = toDateTimeLocalValue(eventItem.startAt);
 		newEventEndAt = toDateTimeLocalValue(eventItem.endAt);
 		newEventUrl = eventItem.url ?? '';
@@ -1569,8 +1570,10 @@
 								<td>{new Date(evt.startAt).toLocaleString()}</td>
 								<td>{evt.title}</td>
 								<td>
-									{#if evt.hostedBy}
-										<a class="slack-link" href={slackUserUrl(evt.hostedBy)} target="_blank" rel="noopener noreferrer">{evt.hostedByName ?? evt.hostedBy}</a>
+									{#if evt.hostedBySlackId}
+										<a class="slack-link" href={slackUserUrl(evt.hostedBySlackId)} target="_blank" rel="noopener noreferrer">{evt.hostedByName ?? evt.hostedBySlackId}</a>
+									{:else if evt.hostedBy}
+										{evt.hostedByName ?? evt.hostedBy}
 									{:else}
 										—
 									{/if}
