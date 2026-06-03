@@ -192,7 +192,7 @@ export class AdminService {
         { nickname: In(hostValues) },
         { name: In(hostValues) },
       ],
-      select: ['slackId', 'name', 'nickname', 'email'],
+      select: ['hcaSub', 'slackId', 'name', 'nickname', 'email'],
     });
     const slackDisplayNames = new Map<string, string | null>();
     await Promise.all(
@@ -202,11 +202,21 @@ export class AdminService {
           slackDisplayNames.set(host.slackId, await this.slackService.getUserDisplayName(host.slackId));
         }),
     );
+    const hcaNicknames = new Map<string, string | null>();
+    await Promise.all(
+      hosts
+        .filter((host) => !!host.slackId && !slackDisplayNames.get(host.slackId) && !host.nickname)
+        .map(async (host) => {
+          const identity = await this.hcaService.getIdentity(host.hcaSub);
+          const nickname = typeof identity?.nickname === 'string' && identity.nickname.trim() ? identity.nickname.trim() : null;
+          hcaNicknames.set(host.slackId, nickname);
+        }),
+    );
 
     const hostLookup = new Map<string, { name: string; slackId: string | null }>();
     for (const host of hosts) {
       const displayName = host.slackId
-        ? slackDisplayNames.get(host.slackId) || host.slackId
+        ? slackDisplayNames.get(host.slackId) || host.nickname || hcaNicknames.get(host.slackId) || host.slackId
         : host.nickname || host.name || host.email;
       for (const key of [host.slackId, host.nickname, host.name]) {
         if (key && !hostLookup.has(key)) {
