@@ -22,6 +22,7 @@ import { AuditLogService } from '../audit-log/audit-log.service';
 import { HcaService } from '../hca/hca.service';
 import { fetchWithTimeout } from '../fetch.util';
 import { ProjectAirtableSyncService } from '../projects/project-airtable-sync.service';
+import { SlackService } from '../slack/slack.service';
 
 const VALID_PERMS = [
   'User',
@@ -91,6 +92,7 @@ export class AdminService {
     private readonly auditLogService: AuditLogService,
     private readonly hcaService: HcaService,
     private readonly airtableSync: ProjectAirtableSyncService,
+    private readonly slackService: SlackService,
   ) {
     this.hackatimeBaseUrl = this.configService.get(
       'HACKATIME_BASE_URL',
@@ -192,9 +194,18 @@ export class AdminService {
       ],
       select: ['slackId', 'name', 'nickname', 'email'],
     });
+    const slackDisplayNames = new Map<string, string | null>();
+    await Promise.all(
+      hosts
+        .filter((host) => !!host.slackId)
+        .map(async (host) => {
+          slackDisplayNames.set(host.slackId, await this.slackService.getUserDisplayName(host.slackId));
+        }),
+    );
+
     const hostLookup = new Map<string, { name: string; slackId: string | null }>();
     for (const host of hosts) {
-      const displayName = host.nickname || host.name || host.email || host.slackId;
+      const displayName = (host.slackId ? slackDisplayNames.get(host.slackId) : null) || host.nickname || host.name || host.email || host.slackId;
       for (const key of [host.slackId, host.nickname, host.name]) {
         if (key && !hostLookup.has(key)) {
           hostLookup.set(key, { name: displayName, slackId: host.slackId ?? null });

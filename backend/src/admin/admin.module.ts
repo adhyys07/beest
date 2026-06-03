@@ -18,6 +18,7 @@ import { HcaModule } from '../hca/hca.module';
 import { DevlogsModule } from '../devlogs/devlogs.module';
 import { FraudReviewModule } from '../fraud-review/fraud-review.module';
 import { ProjectAirtableSyncModule } from '../projects/project-airtable-sync.module';
+import { SlackModule } from '../slack/slack.module';
 import { AdminController } from './admin.controller';
 import { AdminService } from './admin.service';
 import { AuditService } from './audit.service';
@@ -36,6 +37,7 @@ import { FraudReviewerGuard } from './fraud-reviewer.guard';
     DevlogsModule,
     FraudReviewModule,
     ProjectAirtableSyncModule,
+    SlackModule,
   ],
   controllers: [AdminController],
   providers: [AdminService, AuditService, SuperAdminGuard, ReviewerGuard, FraudReviewerGuard],
