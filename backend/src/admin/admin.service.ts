@@ -198,11 +198,15 @@ export class AdminService {
     url?: string | null;
   }) {
     const title = (body.title ?? '').trim();
+    const hostedBy = (body.hostedBy ?? '').trim();
     const startAt = body.startAt ? new Date(body.startAt) : null;
     const endAt = body.endAt ? new Date(body.endAt) : null;
 
     if (!title) {
       throw new BadRequestException('title is required');
+    }
+    if (!hostedBy) {
+      throw new BadRequestException('hostedBy is required');
     }
     if (!startAt || Number.isNaN(startAt.getTime())) {
       throw new BadRequestException('startAt is required and must be a valid datetime');
@@ -217,7 +221,7 @@ export class AdminService {
     const event = this.eventRepo.create({
       title,
       description: body.description?.trim() || null,
-      hostedBy: body.hostedBy?.trim() || null,
+      hostedBy,
       startAt,
       endAt: endAt || null,
       url: body.url?.trim() || null,
@@ -245,7 +249,11 @@ export class AdminService {
       event.description = body.description?.trim() || null;
     }
     if (body.hostedBy !== undefined) {
-      event.hostedBy = body.hostedBy?.trim() || null;
+      const hostedBy = body.hostedBy?.trim() || '';
+      if (!hostedBy) {
+        throw new BadRequestException('hostedBy is required');
+      }
+      event.hostedBy = hostedBy;
     }
     if (body.url !== undefined) {
       event.url = body.url?.trim() || null;
