@@ -6,7 +6,7 @@ import {
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository } from 'typeorm';
+import { In, Repository } from 'typeorm';
 import { User } from '../entities/user.entity';
 import { Session } from '../entities/session.entity';
 import { Project } from '../entities/project.entity';
@@ -176,17 +176,44 @@ export class AdminService {
     };
   }
 
+  private async withEventHosts(events: Event[]): Promise<Array<Event & { hostedByName: string | null }>> {
+    const slackIds = Array.from(
+      new Set(events.map((event) => event.hostedBy).filter((slackId): slackId is string => !!slackId)),
+    );
+    if (slackIds.length === 0) {
+      return events.map((event) => ({ ...event, hostedByName: null }));
+    }
+
+    const hosts = await this.userRepo.find({
+      where: { slackId: In(slackIds) },
+      select: ['slackId', 'name', 'nickname', 'email'],
+    });
+    const hostNames = new Map(
+      hosts.map((host) => [
+        host.slackId,
+        host.nickname || host.name || host.email || host.slackId,
+      ]),
+    );
+
+    return events.map((event) => ({
+      ...event,
+      hostedByName: event.hostedBy ? (hostNames.get(event.hostedBy) ?? event.hostedBy) : null,
+    }));
+  }
+
   async listEvents() {
-    return this.eventRepo.find({ order: { startAt: 'ASC', title: 'ASC' } });
+    const events = await this.eventRepo.find({ order: { startAt: 'ASC', title: 'ASC' } });
+    return this.withEventHosts(events);
   }
 
   async listUpcomingEvents() {
     const now = new Date();
-    return this.eventRepo
+    const events = await this.eventRepo
       .createQueryBuilder('event')
       .where('event.end_at IS NULL OR event.end_at >= :now', { now: now.toISOString() })
       .orderBy('event.start_at', 'ASC')
       .getMany();
+    return this.withEventHosts(events);
   }
 
   async createEvent(body: {
@@ -226,7 +253,9 @@ export class AdminService {
       endAt: endAt || null,
       url: body.url?.trim() || null,
     });
-    return this.eventRepo.save(event);
+    const saved = await this.eventRepo.save(event);
+    const [eventWithHost] = await this.withEventHosts([saved]);
+    return eventWithHost;
   }
 
   async updateEvent(id: string, body: {
@@ -276,7 +305,9 @@ export class AdminService {
       throw new BadRequestException('endAt must be the same or after startAt');
     }
 
-    return this.eventRepo.save(event);
+    const saved = await this.eventRepo.save(event);
+    const [eventWithHost] = await this.withEventHosts([saved]);
+    return eventWithHost;
   }
 
   async deleteEvent(id: string) {

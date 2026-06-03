@@ -64,6 +64,7 @@
 		title: string;
 		description: string | null;
 		hostedBy: string | null;
+		hostedByName: string | null;
 		startAt: string;
 		endAt: string | null;
 		url: string | null;
@@ -1524,7 +1525,7 @@
 						<option value="">{eventHostsLoading ? 'Loading users...' : 'Hosted by'}</option>
 						{#each eventHostUsers as user}
 							{#if user.slackId}
-								<option value={user.slackId}>{user.slackId} — {userDisplayName(user)} — {user.email}</option>
+								<option value={user.slackId}>{userDisplayName(user)} — {user.slackId}</option>
 							{/if}
 						{/each}
 					</select>
@@ -1569,7 +1570,7 @@
 								<td>{evt.title}</td>
 								<td>
 									{#if evt.hostedBy}
-										<a class="slack-link" href={slackUserUrl(evt.hostedBy)} target="_blank" rel="noopener noreferrer">{evt.hostedBy}</a>
+										<a class="slack-link" href={slackUserUrl(evt.hostedBy)} target="_blank" rel="noopener noreferrer">{evt.hostedByName ?? evt.hostedBy}</a>
 									{:else}
 										—
 									{/if}
