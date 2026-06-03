@@ -72,7 +72,7 @@
   let formError = $state('');
   let auditLog = $state<{ action: string; label: string; createdAt: string }[]>([]);
   let newsItems = $state<{ id: string; text: string; displayDate: string }[]>([]);
-  let eventItems = $state<{ id: string; title: string; description: string | null; hostedBy: string | null; hostedByName: string | null; startAt: string; endAt: string | null; location: string | null; url: string | null }[]>(initialEvents);
+  let eventItems = $state<{ id: string; title: string; description: string | null; hostedBy: string | null; hostedByName: string | null; hostedBySlackId: string | null; startAt: string; endAt: string | null; location: string | null; url: string | null }[]>(initialEvents);
   let leaderboard = $state<{ name: string; hours: number }[]>([]);
   let leaderboardLoading = $state(true);
   let leaderboardTotal = $state(0);
@@ -1736,7 +1736,12 @@
                 <h3>{event.title}</h3>
                 {#if event.hostedBy}
                   <p class="event-hosted-by">
-                    Hosted by <a href={slackUserUrl(event.hostedBy)} target="_blank" rel="noopener noreferrer">{event.hostedByName ?? event.hostedBy}</a>
+                    Hosted by
+                    {#if event.hostedBySlackId}
+                      <a href={slackUserUrl(event.hostedBySlackId)} target="_blank" rel="noopener noreferrer">{event.hostedByName ?? event.hostedBySlackId}</a>
+                    {:else}
+                      {event.hostedByName ?? event.hostedBy}
+                    {/if}
                   </p>
                 {/if}
                 {#if event.location}
