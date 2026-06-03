@@ -442,6 +442,10 @@
 		}
 	}
 
+	function userDisplayName(user: UserSummary) {
+		return user.nickname || user.name || user.email || user.hcaSub;
+	}
+
 	async function selectUser(user: UserSummary) {
 		selectedUser = user;
 		userDetail = null;
@@ -630,7 +634,7 @@
 	async function createEvent() {
 		const startAt = toEventApiDate(newEventStartAt);
 		const endAt = toEventApiDate(newEventEndAt);
-		if (!newEventTitle.trim() || !startAt) return;
+		if (!newEventTitle.trim() || !newEventHostedBy.trim() || !startAt) return;
 		eventSaving = true;
 		try {
 			const res = await fetch('/api/admin/events', {
@@ -658,7 +662,7 @@
 		if (!editingEvent) return;
 		const startAt = toEventApiDate(newEventStartAt);
 		const endAt = toEventApiDate(newEventEndAt);
-		if (!newEventTitle.trim() || !startAt) return;
+		if (!newEventTitle.trim() || !newEventHostedBy.trim() || !startAt) return;
 		eventSaving = true;
 		try {
 			const res = await fetch(`/api/admin/events/${editingEvent.id}`, {
@@ -1111,7 +1115,7 @@
 		if (activeTab === 'users') { loadUsers(); }
 		if (activeTab === 'stats') { loadUsers(); if (isSuperAdmin) loadUnreviewedHours(); }
 		if (activeTab === 'news') loadNews();
-		if (activeTab === 'events') loadEvents();
+		if (activeTab === 'events') { loadEvents(); if (users.length === 0) loadUsers(); }
 		if (activeTab === 'projects') loadProjects();
 		if (activeTab === 'shop') loadShop();
 		if (activeTab === 'fulfillment') { loadFulfillment(); loadHcbStatus(); }
@@ -1488,7 +1492,12 @@
 				<div class="event-form-fields">
 					<input type="text" placeholder="Title" bind:value={newEventTitle} class="news-input event-title-input" />
 					<input type="url" placeholder="URL (optional)" bind:value={newEventUrl} class="news-input event-url-input" />
-					<input type="text" placeholder="Hosted by (optional)" bind:value={newEventHostedBy} class="news-input event-hosted-input" />
+					<select bind:value={newEventHostedBy} class="news-input event-hosted-input">
+						<option value="">Hosted by</option>
+						{#each users as user}
+							<option value={userDisplayName(user)}>{userDisplayName(user)} — {user.email}</option>
+						{/each}
+					</select>
 					<textarea placeholder="Description" bind:value={newEventDescription} class="news-input news-input-text event-description-input" rows="3"></textarea>
 					<div class="news-date-row event-date-row">
 						<label for="event-start-at">Start</label>
@@ -1499,7 +1508,7 @@
 						<input id="event-end-at" type="datetime-local" bind:value={newEventEndAt} class="news-input news-input-date" />
 					</div>
 					<div class="news-form-actions event-form-actions">
-						<button class="btn btn-add-news" onclick={editingEvent ? saveEventEdit : createEvent} disabled={eventSaving || !newEventTitle.trim() || !newEventStartAt.trim()}>
+						<button class="btn btn-add-news" onclick={editingEvent ? saveEventEdit : createEvent} disabled={eventSaving || !newEventTitle.trim() || !newEventHostedBy.trim() || !newEventStartAt.trim()}>
 							{eventSaving ? 'Saving...' : editingEvent ? 'Save Event' : 'Add Event'}
 						</button>
 						{#if editingEvent}
