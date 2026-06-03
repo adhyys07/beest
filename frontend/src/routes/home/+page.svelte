@@ -1735,7 +1735,7 @@
                 </div>
                 <h3>{event.title}</h3>
                 {#if event.hostedBy}
-                  <p class="event-hosted-by">Hosted by {event.hostedBy}</p>
+                  <p class="event-hosted-by">Hosted by <a href={slackUserUrl(event.hostedBy)} target="_blank" rel="noopener noreferrer">{event.hostedBy}</a></p>
                 {/if}
                 {#if event.location}
                   <p class="event-location">{event.location}</p>
@@ -3238,6 +3238,7 @@
 
   .event-hosted-by {
     display: inline-flex;
+    gap: 6px;
     width: fit-content;
     padding: 4px 9px;
     border: 1px solid rgba(203, 193, 174, 0.18);
@@ -3246,6 +3247,11 @@
     color: #e6f4fe;
     font-weight: 700;
     box-shadow: 3px 3px 0 rgba(0, 0, 0, 0.14);
+  }
+
+  .event-hosted-by a {
+    color: #93b4cd;
+    text-decoration: underline;
   }
 
   .event-card-meta {
