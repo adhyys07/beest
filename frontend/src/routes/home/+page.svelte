@@ -1359,7 +1359,7 @@
   <nav class="sidebar pinned" aria-label="Home navigation">
     <div class="sidebar-panel">
       <div class="sidebar-content">
-        <a href="/" class="sidebar-brand">#BEEST</a>
+        <a href="/" class="sidebar-brand">BEEST</a>
         <p class="sidebar-greeting">Hey {data.user.nickname ?? data.user.name ?? 'there!'}</p>
         <ul class="sidebar-nav">
           {#each navItems as item}
