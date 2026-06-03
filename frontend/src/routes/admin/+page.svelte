@@ -1523,7 +1523,9 @@
 					<select bind:value={newEventHostedBy} class="news-input event-hosted-input">
 						<option value="">{eventHostsLoading ? 'Loading users...' : 'Hosted by'}</option>
 						{#each eventHostUsers as user}
-							<option value={userDisplayName(user)}>{userDisplayName(user)} — {user.email}</option>
+							{#if user.slackId}
+								<option value={user.slackId}>{user.slackId} — {userDisplayName(user)} — {user.email}</option>
+							{/if}
 						{/each}
 					</select>
 					<textarea placeholder="Description" bind:value={newEventDescription} class="news-input news-input-text event-description-input" rows="3"></textarea>
@@ -1565,7 +1567,13 @@
 							<tr>
 								<td>{new Date(evt.startAt).toLocaleString()}</td>
 								<td>{evt.title}</td>
-								<td>{evt.hostedBy ?? '—'}</td>
+								<td>
+									{#if evt.hostedBy}
+										<a class="slack-link" href={slackUserUrl(evt.hostedBy)} target="_blank" rel="noopener noreferrer">{evt.hostedBy}</a>
+									{:else}
+										—
+									{/if}
+								</td>
 									<td class="news-actions">
 									<button class="btn btn-edit" onclick={() => editEvent(evt)}>Edit</button>
 									<button class="btn btn-delete" onclick={() => deleteEvent(evt.id)} disabled={eventSaving}>Delete</button>
