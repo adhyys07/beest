@@ -146,6 +146,38 @@
   let nicknameInput = $state(data.user.nickname ?? '');
   let nicknameSaving = $state(false);
   let genderSaving = $state(false);
+
+  // One-time "here for the hackathon or the shop?" prompt. Stays up until the
+  // user picks an option (recorded in Airtable); not dismissable otherwise.
+  let showIntent = $state(data.needsIntent === true);
+  let intentSaving = $state(false);
+  let intentError = $state('');
+  let intentThanked = $state(false); // swap to the thank-you message after a successful pick
+  let intentFadingOut = $state(false); // triggers the overlay fade-out
+  async function chooseIntent(choice: 'Hackathon' | 'Shop' | 'Browsing' | 'Both') {
+    if (intentSaving) return;
+    intentSaving = true;
+    intentError = '';
+    try {
+      const res = await fetch('/api/auth/intent', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ choice })
+      });
+      if (res.ok) {
+        // Show a brief thank-you, then fade the overlay out and remove it.
+        intentThanked = true;
+        setTimeout(() => { intentFadingOut = true; }, 1100);
+        setTimeout(() => { showIntent = false; }, 1600);
+      } else {
+        intentError = 'Could not save — please try again.';
+      }
+    } catch {
+      intentError = 'Could not save — please try again.';
+    } finally {
+      intentSaving = false;
+    }
+  }
   const GENDER_OPTIONS: { value: string; label: string }[] = [
     { value: 'male', label: 'Male' },
     { value: 'female', label: 'Female' },
@@ -2257,6 +2289,39 @@
       </div>
     </div>
     {/if}
+    {/if}
+
+    <!-- One-time "hackathon or shop?" prompt. No dismiss — stays until answered.
+         Rendered outside any activeSection block so it shows on every /home visit,
+         not just the shop tab. -->
+    {#if showIntent}
+    <!-- svelte-ignore a11y_no_static_element_interactions -->
+    <div use:portal class="intent-overlay" class:intent-hide={intentFadingOut} role="dialog" aria-modal="true" aria-label="Why are you here?">
+      <div class="intent-modal">
+        {#if intentThanked}
+          <h2 class="intent-title">Thank you!</h2>
+          <p class="intent-sub">Your answer's been saved.</p>
+        {:else}
+          <h2 class="intent-title">What brings you here?</h2>
+          <p class="intent-sub">Let me know your intention so I can work out the event budget</p>
+          <div class="intent-options">
+            <button class="intent-btn" onclick={() => chooseIntent('Hackathon')} disabled={intentSaving}>
+              <span>The hackathon</span>
+            </button>
+            <button class="intent-btn" onclick={() => chooseIntent('Shop')} disabled={intentSaving}>
+              <span>The shop</span>
+            </button>
+            <button class="intent-btn" onclick={() => chooseIntent('Browsing')} disabled={intentSaving}>
+              <span>Just browsing</span>
+            </button>
+            <button class="intent-btn" onclick={() => chooseIntent('Both')} disabled={intentSaving}>
+              <span>Both / unsure</span>
+            </button>
+          </div>
+          {#if intentError}<p class="intent-error">{intentError}</p>{/if}
+        {/if}
+      </div>
+    </div>
     {/if}
 
     {#if activeSection === 'explore'}
@@ -5248,6 +5313,81 @@
 
   .shop-card-skeleton .skeleton-line.wide { width: 80%; }
   .shop-card-skeleton .skeleton-line.narrow { width: 40%; }
+
+  /* ── intent prompt ── */
+  .intent-overlay {
+    position: fixed;
+    inset: 0;
+    background: rgba(0, 0, 0, 0.78);
+    z-index: 1100;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    backdrop-filter: blur(6px);
+    animation: fadeIn 200ms ease;
+    padding: 1rem;
+    opacity: 1;
+    transition: opacity 500ms ease;
+  }
+  .intent-overlay.intent-hide {
+    opacity: 0;
+    pointer-events: none;
+  }
+  .intent-modal {
+    background: #4b4840;
+    color: #e8e0d4;
+    border: 1px solid #6c6659;
+    border-radius: 14px;
+    padding: 2rem 1.75rem;
+    width: 100%;
+    max-width: 420px;
+    text-align: center;
+    box-shadow: 0 20px 60px rgba(0, 0, 0, 0.5);
+  }
+  .intent-title {
+    margin: 0 0 0.35rem;
+    font-size: 1.5rem;
+  }
+  .intent-sub {
+    margin: 0 0 1.5rem;
+    opacity: 0.75;
+    font-size: 0.95rem;
+  }
+  .intent-options {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 1rem;
+  }
+  .intent-btn {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 0.5rem;
+    padding: 1.25rem 0.75rem;
+    border-radius: 12px;
+    border: 1px solid #6c6659;
+    background: #52504a;
+    color: #e8e0d4;
+    font-size: 1rem;
+    font-weight: 600;
+    cursor: pointer;
+    transition: transform 120ms ease, background 120ms ease, border-color 120ms ease;
+  }
+  .intent-btn:hover:not(:disabled) {
+    background: #5d5a52;
+    border-color: #93b4cd;
+    transform: translateY(-2px);
+  }
+  .intent-btn:disabled {
+    opacity: 0.6;
+    cursor: not-allowed;
+  }
+  .intent-error {
+    margin: 1rem 0 0;
+    color: #ffb3b3;
+    font-size: 0.85rem;
+  }
 
   /* ── shop modal ── */
   .shop-modal-overlay {

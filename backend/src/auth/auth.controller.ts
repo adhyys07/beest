@@ -193,6 +193,28 @@ export class AuthController {
     return this.authService.updateGender(uid, gender as Gender);
   }
 
+  @UseGuards(JwtAuthGuard)
+  @Get('intent')
+  async getIntent(@Req() req: Request) {
+    const uid = (req as any).user?.uid;
+    if (!uid) throw new UnauthorizedException();
+    return this.authService.getIntentStatus(uid);
+  }
+
+  @Throttle({ default: { limit: 10, ttl: 60000 } })
+  @UseGuards(JwtAuthGuard)
+  @Post('intent')
+  async setIntent(@Req() req: Request, @Body() body: { choice?: string }) {
+    const uid = (req as any).user?.uid;
+    if (!uid) throw new UnauthorizedException();
+    const choice = body.choice;
+    const allowed = ['Hackathon', 'Shop', 'Browsing', 'Both'];
+    if (!choice || !allowed.includes(choice)) {
+      throw new BadRequestException(`choice must be one of: ${allowed.join(', ')}`);
+    }
+    return this.authService.setIntent(uid, choice);
+  }
+
   /**
    * Invalidates the session's refresh token. The proxy clears cookies.
    */

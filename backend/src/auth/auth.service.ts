@@ -365,6 +365,32 @@ export class AuthService {
     return { token };
   }
 
+  /** Whether the one-time home "hackathon or shop?" prompt still needs answering. */
+  async getIntentStatus(userId: string): Promise<{ needsPrompt: boolean }> {
+    const user = await this.userRepo.findOne({
+      where: { id: userId },
+      select: ['id', 'intent'],
+    });
+    return { needsPrompt: !!user && !user.intent };
+  }
+
+  /**
+   * Records the user's home-prompt answer. Writes Airtable FIRST — only on
+   * success do we set the local flag, so a transient Airtable failure leaves
+   * the prompt showing (it keeps showing until answered) rather than silently
+   * dropping the response.
+   */
+  async setIntent(userId: string, intent: string): Promise<{ success: true }> {
+    const user = await this.userRepo.findOne({ where: { id: userId } });
+    if (!user) throw new Error('User not found');
+
+    await this.rsvpService.setIntent(user.email, intent);
+
+    user.intent = intent;
+    await this.userRepo.save(user);
+    return { success: true };
+  }
+
   private async upsertUser(
     userinfo: Record<string, any>,
     hcaAccessToken?: string,

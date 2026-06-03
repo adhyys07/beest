@@ -133,6 +133,31 @@ export class RsvpService {
     await this.updatePerms(rawEmail, '');
   }
 
+  /** Records the home "hackathon or shop?" answer onto the user's RSVP record. */
+  async setIntent(rawEmail: string, intent: string): Promise<void> {
+    const recordId = await this.findRecordIdByEmail(rawEmail);
+    if (!recordId) {
+      throw new HttpException('User not found in Airtable', HttpStatus.NOT_FOUND);
+    }
+
+    const res = await fetchWithTimeout(`${this.baseUrl}/${recordId}`, {
+      method: 'PATCH',
+      headers: {
+        Authorization: `Bearer ${this.airtableApiKey}`,
+        'Content-Type': 'application/json',
+      },
+      // typecast lets Airtable create the single-select option if it doesn't
+      // exist yet (e.g. the new "Browsing"/"Both" choices).
+      body: JSON.stringify({ typecast: true, fields: { Intent: intent } }),
+    });
+
+    if (!res.ok) {
+      const text = await res.text();
+      console.error('Airtable intent update error:', res.status, text);
+      throw new HttpException('Failed to record intent', HttpStatus.BAD_GATEWAY);
+    }
+  }
+
   async getPerms(rawEmail: string): Promise<string | null> {
     const email = this.sanitizeEmail(rawEmail);
     const searchParams = new URLSearchParams({
