@@ -471,6 +471,12 @@
 						{#if submitError}<div class="err sub-err">{submitError}</div>{/if}
 
 						{#if action === 'approve'}
+							{#if trust?.totalHours != null}
+								<div class="ht-recorded">
+									<span class="ht-recorded-label">Hackatime recorded</span>
+									<span class="ht-recorded-val">{trust.totalHours.toFixed(1)}<span class="ht-recorded-unit">h</span></span>
+								</div>
+							{/if}
 							<label class="fl" for="hrs">user-facing hours <span class="muted">(final cumulative total for this project — drives pipes)</span></label>
 							<div class="hrs-row">
 								<input
@@ -487,7 +493,7 @@
 									}}
 								/>
 								{#if current.isOneShot}
-									<span class="hrs-note">no first review — set the final approved hours yourself{#if trust?.totalHours != null} (Hackatime: {trust.totalHours.toFixed(1)}h){/if}</span>
+									<span class="hrs-note">no first review — set the final approved hours yourself (you may exceed the recorded total)</span>
 								{:else if scaledHours !== baseHours}
 									<span class="hrs-note">first review: {baseHours}h → after exclusions {scaledHours}h</span>
 								{:else}
@@ -866,6 +872,31 @@
 		font-family: inherit;
 	}
 	.hrs-note { font-size: 0.8rem; color: var(--text-muted); }
+
+	.ht-recorded {
+		display: flex;
+		align-items: baseline;
+		gap: 0.6rem;
+		padding: 0.5rem 0.9rem;
+		background: var(--surface-2);
+		border: 1px solid var(--border);
+		border-radius: 0.4rem;
+		align-self: flex-start;
+	}
+	.ht-recorded-label {
+		font-size: 0.7rem;
+		text-transform: uppercase;
+		letter-spacing: 0.06em;
+		color: var(--text-muted);
+	}
+	.ht-recorded-val {
+		font-size: 2rem;
+		font-weight: 700;
+		line-height: 1;
+		color: var(--text);
+		font-variant-numeric: tabular-nums;
+	}
+	.ht-recorded-unit { font-size: 1.1rem; font-weight: 600; color: var(--text-muted); margin-left: 0.1rem; }
 
 	textarea {
 		width: 100%;

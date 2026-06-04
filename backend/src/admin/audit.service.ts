@@ -393,28 +393,10 @@ export class AuditService {
           `Cannot reduce hours to ${finalOverride} — ${project.pipesGranted} pipes already granted.`,
         );
       }
-      // One-shot: enforce the same Hackatime cap the first-pass would apply.
-      // Cap = currentHackatime + 0.5h rounding buffer (previousProjectHours is
-      // 0 since first-pass never ran). Hackatime outage is logged and skipped
-      // rather than blocking the review.
-      if (isOneShot) {
-        try {
-          const ht = await this.adminService.getProjectHackatime(project.id, false);
-          const currentHackatime = ht?.totalHours ?? 0;
-          const allowedDelta = currentHackatime + 0.5;
-          if (finalOverride > allowedDelta) {
-            const hackatimeHours = Math.round(currentHackatime * 10) / 10;
-            throw new BadRequestException(
-              `Cannot approve ${finalOverride}h — Hackatime shows only ${hackatimeHours}h. Reduce the approved hours, or reject instead.`,
-            );
-          }
-        } catch (e) {
-          if (e instanceof BadRequestException) throw e;
-          this.logger.warn(
-            `One-shot Hackatime cap check failed for project ${project.id}: ${e}`,
-          );
-        }
-      }
+      // No Hackatime ceiling here: the audit is a manual SA decision and may
+      // legitimately approve more hours than Hackatime recorded (e.g. work the
+      // tracker missed). The recorded Hackatime total is surfaced in the UI for
+      // context, but the SA's number is authoritative.
       project.overrideHours = finalOverride;
       if (submission) submission.overrideHours = finalOverride;
 
