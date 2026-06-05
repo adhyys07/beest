@@ -67,6 +67,8 @@
   let activeSection = $state(sectionFromPath(page.url.pathname));
   let tileLoaded = $state(false);
   let customCursorEnabled = $state(typeof localStorage !== 'undefined' ? localStorage.getItem('customCursor') !== 'off' : true);
+  const EVENT_START = new Date('2026-07-10T00:00:00+02:00').getTime();
+  let eventCountdown = $state({ days: 0, hours: 0, minutes: 0, seconds: 0, live: false });
   let creatingProject = $state(false);
   let editingProject = $state<any>(null);
   type ProjectReview = { id: string; status: 'approved' | 'changes_needed'; feedback: string | null; reviewerName: string | null; createdAt: string };
@@ -1061,6 +1063,23 @@
     pushState(sectionRoutes[id] ?? '/projects', {});
   }
 
+  function updateEventCountdown() {
+    const remaining = EVENT_START - Date.now();
+    if (remaining <= 0) {
+      eventCountdown = { days: 0, hours: 0, minutes: 0, seconds: 0, live: true };
+      return;
+    }
+
+    const totalSeconds = Math.floor(remaining / 1000);
+    eventCountdown = {
+      days: Math.floor(totalSeconds / 86400),
+      hours: Math.floor((totalSeconds % 86400) / 3600),
+      minutes: Math.floor((totalSeconds % 3600) / 60),
+      seconds: totalSeconds % 60,
+      live: false,
+    };
+  }
+
   async function fetchPipes() {
     try {
       const res = await fetch('/api/shop/pipes');
@@ -1339,6 +1358,8 @@
     fetchPipes();
     fetchUnreadCount();
     loadSectionData(activeSection);
+    updateEventCountdown();
+    const countdownTimer = window.setInterval(updateEventCountdown, 1000);
 
     const handlePopstate = () => {
       const section = sectionFromPath(window.location.pathname);
@@ -1348,6 +1369,7 @@
     };
     window.addEventListener('popstate', handlePopstate);
     return () => {
+      window.clearInterval(countdownTimer);
       window.removeEventListener('popstate', handlePopstate);
     };
   });
@@ -1938,6 +1960,23 @@
     {#if !creatingProject && !editingProject && !reviewProject && activeSection === 'projects'}
     <section class="section section-projects">
       <div class="section-inner">
+        <div class="event-countdown" aria-label="Countdown to Beest">
+          <div>
+            <p class="event-countdown-kicker">Beest starts</p>
+            <h2 class="event-countdown-title">July 10, Scheveningen</h2>
+          </div>
+          {#if eventCountdown.live}
+            <p class="event-countdown-live">Beest is live</p>
+          {:else}
+            <div class="event-countdown-grid">
+              <div class="event-countdown-unit"><strong>{eventCountdown.days}</strong><span>Days</span></div>
+              <div class="event-countdown-unit"><strong>{eventCountdown.hours}</strong><span>Hours</span></div>
+              <div class="event-countdown-unit"><strong>{eventCountdown.minutes}</strong><span>Minutes</span></div>
+              <div class="event-countdown-unit"><strong>{eventCountdown.seconds}</strong><span>Seconds</span></div>
+            </div>
+          {/if}
+        </div>
+
         <div class="section-header">
           <div>
             <h2 class="section-title">My Projects</h2>
@@ -5714,6 +5753,89 @@
   .section-projects {
     background: #635a4e;
     padding-top: 48px;
+  }
+
+  .event-countdown {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 24px;
+    margin-bottom: 28px;
+    padding: 18px 20px;
+    background: rgba(75, 72, 64, 0.58);
+    border: 2px solid rgba(230, 244, 254, 0.16);
+    box-shadow: 8px 8px 0 rgba(0, 0, 0, 0.16);
+  }
+
+  .event-countdown-kicker {
+    margin: 0 0 6px;
+    font-family: "Sunny Mood", "Courier New", monospace;
+    font-size: 18px;
+    color: #cbc1ae;
+  }
+
+  .event-countdown-title {
+    margin: 0;
+    font-family: "Stone Breaker", "Courier New", monospace;
+    font-size: clamp(30px, 3.6vw, 50px);
+    line-height: 0.95;
+    color: #e6f4fe;
+    letter-spacing: 0;
+  }
+
+  .event-countdown-grid {
+    display: grid;
+    grid-template-columns: repeat(4, minmax(78px, 1fr));
+    gap: 8px;
+    min-width: min(100%, 420px);
+  }
+
+  .event-countdown-unit {
+    display: grid;
+    place-items: center;
+    min-height: 82px;
+    padding: 10px 8px;
+    background: #586063;
+    border: 1px solid rgba(230, 244, 254, 0.22);
+    box-shadow: 4px 4px 0 rgba(0, 0, 0, 0.16);
+  }
+
+  .event-countdown-unit strong {
+    font-family: "Stone Breaker", "Courier New", monospace;
+    font-size: clamp(30px, 3vw, 42px);
+    line-height: 1;
+    color: #93b4cd;
+  }
+
+  .event-countdown-unit span {
+    font-family: "Sunny Mood", "Courier New", monospace;
+    font-size: 14px;
+    color: #e6f4fe;
+  }
+
+  .event-countdown-live {
+    margin: 0;
+    font-family: "Stone Breaker", "Courier New", monospace;
+    font-size: clamp(32px, 4vw, 54px);
+    color: #93b4cd;
+  }
+
+  @media (max-width: 760px) {
+    .event-countdown {
+      align-items: stretch;
+      flex-direction: column;
+      gap: 14px;
+      padding: 16px;
+    }
+
+    .event-countdown-grid {
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      min-width: 0;
+    }
+
+    .event-countdown-unit {
+      min-height: 70px;
+    }
   }
 
   .progress-bar-wrap {
