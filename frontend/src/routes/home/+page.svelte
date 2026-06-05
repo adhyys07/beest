@@ -5831,19 +5831,39 @@
 
   @media (max-width: 760px) {
     .event-countdown {
-      align-items: stretch;
-      flex-direction: column;
-      gap: 14px;
-      padding: 16px;
+      align-items: center;
+      flex: 0 0 auto;
+      flex-direction: row;
+      flex-wrap: wrap;
+      gap: 8px 10px;
+      width: 100%;
+      max-width: none;
+      min-width: 0;
+      padding: 10px;
+    }
+
+    .event-countdown-kicker {
+      flex: 1 1 100%;
+      white-space: normal;
+    }
+
+    .event-countdown-logo {
+      font-size: 22px;
     }
 
     .event-countdown-grid {
-      grid-template-columns: repeat(2, minmax(0, 1fr));
+      flex: 1 1 100%;
+      grid-template-columns: repeat(4, minmax(0, 1fr));
       min-width: 0;
     }
 
     .event-countdown-unit {
-      min-height: 70px;
+      min-height: 48px;
+      padding: 5px;
+    }
+
+    .event-countdown-unit strong {
+      font-size: 22px;
     }
   }
 
