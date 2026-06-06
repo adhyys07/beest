@@ -620,7 +620,7 @@
   /* ── decorative pipes ───────────────────────────── */
   .page-wrap {
     position: relative;
-    overflow-x: clip;
+    overflow-x: hidden;
   }
 
   .pipe {
@@ -1377,7 +1377,7 @@
   .carousel-section {
     position: relative;
     z-index: 2;
-    overflow-x: clip;
+    overflow-x: hidden;
     overflow-y: visible;
     padding: 100px 0 100px;
     display: grid;
