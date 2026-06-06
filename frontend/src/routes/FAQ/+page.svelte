@@ -142,7 +142,7 @@
     min-height: 100vh;
     padding: 2rem 1.5rem;
     position: relative;
-    overflow-x: clip;
+    overflow-x: hidden;
   }
 
   .faq-page::after {
