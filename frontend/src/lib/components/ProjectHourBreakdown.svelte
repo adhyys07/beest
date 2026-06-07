@@ -50,7 +50,6 @@
       <span class="breakdown-loading">Loading…</span>
     {/if}
   </div>
-
   <div class="breakdown-inner">
     <div class="donut-wrap">
       <svg viewBox="0 0 {size} {size}" class="donut">
@@ -94,11 +93,12 @@
             stroke-dasharray="{emptyDash} {circumference - emptyDash}"
             stroke-dashoffset="{-aiOffset - nonAiOffset}"
           />
-        {/if}
+      {/if}
       </svg>
       <div class="donut-center">
+        <span class="donut-kicker">Total</span>
         <strong>{totalLabel}</strong>
-        <span>Tracked</span>
+        <span class="donut-sub">Tracked</span>
       </div>
     </div>
 
@@ -139,6 +139,7 @@
     padding: 1rem;
     max-width: 100%;
     box-shadow: var(--shadow-soft, 0 10px 30px rgba(0, 0, 0, 0.06));
+    color: var(--text, #f5ebdc);
   }
 
   .breakdown-header {
@@ -153,18 +154,45 @@
     display: block;
     font-weight: 700;
     letter-spacing: -0.02em;
+    color: var(--text, #f5ebdc);
   }
 
   .breakdown-subtitle {
     display: block;
-    color: var(--muted, #6f6b65);
+    color: var(--muted, rgba(245, 235, 220, 0.76));
     font-size: 0.95rem;
     margin-top: 0.25rem;
   }
 
   .breakdown-loading {
-    color: var(--muted, #6f6b65);
+    color: var(--muted, rgba(245, 235, 220, 0.76));
     font-size: 0.95rem;
+  }
+
+  .breakdown-summary {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.5rem;
+    margin-bottom: 1rem;
+  }
+
+  .breakdown-summary span {
+    display: inline-flex;
+    align-items: baseline;
+    gap: 0.35rem;
+    padding: 0.45rem 0.7rem;
+    border: 1px solid rgba(255, 255, 255, 0.12);
+    border-radius: 999px;
+    background: rgba(255, 255, 255, 0.05);
+    color: var(--muted, rgba(245, 235, 220, 0.76));
+    font-size: 0.9rem;
+    line-height: 1;
+  }
+
+  .breakdown-summary strong {
+    color: var(--text, #f5ebdc);
+    font-weight: 800;
+    font-size: 0.98rem;
   }
 
   .breakdown-inner {
@@ -194,7 +222,7 @@
   }
 
   .donut-ring {
-    stroke: var(--surface-border, #f1ede9);
+    stroke: var(--surface-border, rgba(255, 255, 255, 0.12));
   }
 
   .donut-segment.ai {
@@ -212,16 +240,54 @@
   .donut-center {
     position: absolute;
     inset: 0;
-    display: grid;
-    place-items: center;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 0.06rem;
+    width: 78px;
+    margin: 0 auto;
     text-align: center;
     pointer-events: none;
+    color: var(--text, #f5ebdc);
+    overflow: hidden;
+  }
+
+  .donut-kicker {
+    display: block;
+    font-size: 0.58rem;
+    text-transform: uppercase;
+    letter-spacing: 0;
+    color: var(--muted, rgba(245, 235, 220, 0.76));
+    margin: 0;
+    line-height: 1;
   }
 
   .donut-center strong {
     display: block;
-    font-size: 1.15rem;
-    margin-bottom: 0.15rem;
+    font-size: 1.05rem;
+    line-height: 0.95;
+    margin: 0;
+    font-weight: 800;
+    color: var(--text, #f5ebdc);
+    text-shadow: 0 1px 0 rgba(255, 255, 255, 0.18);
+  }
+
+  .donut-center span {
+    display: block;
+    font-size: 0.56rem;
+    text-transform: uppercase;
+    letter-spacing: 0;
+    color: var(--muted, rgba(245, 235, 220, 0.76));
+  }
+
+  .donut-sub {
+    display: block;
+    font-size: 0.56rem;
+    text-transform: uppercase;
+    letter-spacing: 0;
+    color: var(--muted, rgba(245, 235, 220, 0.7));
+    line-height: 1;
   }
 
   .breakdown-details {
@@ -252,14 +318,25 @@
 
   .breakdown-label {
     display: block;
-    color: var(--muted, #6f6b65);
-    font-size: 0.95rem;
+    color: var(--muted, rgba(245, 235, 220, 0.76));
+    font-size: 0.8rem;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+  }
+
+  .breakdown-item strong {
+    display: block;
+    margin-top: 0.15rem;
+    color: var(--text, #f5ebdc);
+    font-size: 1rem;
+    line-height: 1.1;
+    font-weight: 800;
   }
 
   .project-breakdown ul {
     margin: 0.5rem 0 0;
     padding-left: 1rem;
-    color: var(--muted, #6f6b65);
+    color: var(--muted, rgba(245, 235, 220, 0.76));
     font-size: 0.95rem;
   }
 

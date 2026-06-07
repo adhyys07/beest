@@ -1,5 +1,6 @@
 import { redirect } from '@sveltejs/kit';
 import { env } from '$env/dynamic/private';
+import { AUTH_TOKEN_MAX_AGE } from '$lib/server/auth';
 import type { PageServerLoad } from './$types';
 
 const BACKEND_URL = env.BACKEND_URL ?? 'http://localhost:3001';
@@ -58,8 +59,8 @@ export const load: PageServerLoad = async ({ url, cookies }) => {
 		redirect(302, 'https://fraud.hackclub.com/');
 	}
 
-	// Store JWT (1h) and refresh token (90d) in httpOnly cookies
-	cookies.set('auth_token', token, { ...cookieOpts, maxAge: 3600 });
+	// Store JWT (7d) and refresh token (90d) in httpOnly cookies
+	cookies.set('auth_token', token, { ...cookieOpts, maxAge: AUTH_TOKEN_MAX_AGE });
 	cookies.set('refresh_token', refreshToken, {
 		...cookieOpts,
 		maxAge: 90 * 24 * 60 * 60

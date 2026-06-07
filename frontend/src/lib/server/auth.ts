@@ -2,6 +2,7 @@ import { env } from '$env/dynamic/private';
 import type { Cookies } from '@sveltejs/kit';
 
 const BACKEND_URL = env.BACKEND_URL ?? 'http://localhost:3001';
+export const AUTH_TOKEN_MAX_AGE = 7 * 24 * 60 * 60;
 
 const COOKIE_OPTS = {
 	path: '/',
@@ -37,7 +38,7 @@ export async function tryRefreshToken(
 	}
 
 	const data = await res.json();
-	cookies.set('auth_token', data.token, { ...COOKIE_OPTS, maxAge: 3600 });
+	cookies.set('auth_token', data.token, { ...COOKIE_OPTS, maxAge: AUTH_TOKEN_MAX_AGE });
 	cookies.set('refresh_token', data.refreshToken, {
 		...COOKIE_OPTS,
 		maxAge: 90 * 24 * 60 * 60
@@ -88,7 +89,7 @@ export async function proxyWithRefresh(
 
 	// If the backend issued a new JWT (e.g. after nickname update), persist it
 	if (res.ok && data.token) {
-		cookies.set('auth_token', data.token, { ...COOKIE_OPTS, maxAge: 3600 });
+		cookies.set('auth_token', data.token, { ...COOKIE_OPTS, maxAge: AUTH_TOKEN_MAX_AGE });
 	}
 
 	return new Response(JSON.stringify(data), {
@@ -128,7 +129,7 @@ export async function getAuthenticatedUser(
 			const data = await res.json();
 
 			// Set the rotated tokens
-			cookies.set('auth_token', data.token, { ...COOKIE_OPTS, maxAge: 3600 });
+			cookies.set('auth_token', data.token, { ...COOKIE_OPTS, maxAge: AUTH_TOKEN_MAX_AGE });
 			cookies.set('refresh_token', data.refreshToken, {
 				...COOKIE_OPTS,
 				maxAge: 90 * 24 * 60 * 60
