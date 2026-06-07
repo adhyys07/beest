@@ -1,5 +1,7 @@
 <script lang="ts">
   let {
+    title = 'Hackatime Hours',
+    perProjectLabel = 'Per project',
     totalHours = null,
     aiHours = null,
     nonAiHours = null,
@@ -7,6 +9,8 @@
     startDate = null,
     loading = false,
   }: {
+    title?: string;
+    perProjectLabel?: string;
     totalHours: number | null;
     aiHours: number | null;
     nonAiHours: number | null;
@@ -37,7 +41,7 @@
 <section class="breakdown-card" aria-busy={loading}>
   <div class="breakdown-header">
     <div>
-      <span class="breakdown-title">Hackatime Hours</span>
+      <span class="breakdown-title">{title}</span>
       {#if startDate}
         <span class="breakdown-subtitle">Since {startDate}</span>
       {/if}
@@ -115,7 +119,7 @@
       </div>
       {#if perProject.length > 0}
         <div class="project-breakdown">
-          <span class="breakdown-label">Per project</span>
+          <span class="breakdown-label">{perProjectLabel}</span>
           <ul>
             {#each perProject as item}
               <li>{item.name}: {Math.round(item.hours * 10) / 10}h</li>
