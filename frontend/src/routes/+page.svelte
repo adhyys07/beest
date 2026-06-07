@@ -370,7 +370,7 @@
   <p>
     Beest is a <a href="https://hackclub.com" target="_blank" rel="noreferrer">Hack Club</a> Event
     running <strong>August 16–21</strong> in the Netherlands.
-    We're flying 50 teens out to build walking mechanisms on the same beach the famous
+    We're flying 30 teens out to build walking mechanisms on the same beach the famous
     Strandbeest was constructed. A strandbeest is a kinetic sculpture - a giant walking mechanism of
     pipe and cloth (no motors), and we'll be going to watch the display of the strandbeests
     during the event! Everything (including flights, food and accommodation) is totally free for
