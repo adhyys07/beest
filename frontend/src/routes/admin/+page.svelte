@@ -140,6 +140,7 @@
 		aiHours: number;
 		nonAiHours: number;
 		earliestHeartbeat: number | null;
+		startDate: string | null;
 		previousApprovedHours: number;
 		previousInternalHours: number;
 		trustLevel: string | null;
@@ -361,10 +362,10 @@
 				if (res.ok) {
 					hackatimeData = await res.json();
 				} else {
-					hackatimeData = { totalHours: 0, aiHours: 0, nonAiHours: 0, earliestHeartbeat: null, previousApprovedHours: 0, previousInternalHours: 0, hackatimeProjects: [], trustLevel: null, linkedBanned: false, linkedEmail: null, linkedSlackUid: null, beestEmail: null, beestSlackId: null, emailMismatch: false, unifiedDuplicate: false, unifiedError: true };
+					hackatimeData = { totalHours: 0, aiHours: 0, nonAiHours: 0, earliestHeartbeat: null, startDate: null, previousApprovedHours: 0, previousInternalHours: 0, hackatimeProjects: [], trustLevel: null, linkedBanned: false, linkedEmail: null, linkedSlackUid: null, beestEmail: null, beestSlackId: null, emailMismatch: false, unifiedDuplicate: false, unifiedError: true };
 				}
 			} catch {
-				hackatimeData = { totalHours: 0, aiHours: 0, nonAiHours: 0, earliestHeartbeat: null, previousApprovedHours: 0, previousInternalHours: 0, hackatimeProjects: [], trustLevel: null, linkedBanned: false, linkedEmail: null, linkedSlackUid: null, beestEmail: null, beestSlackId: null, emailMismatch: false, unifiedDuplicate: false, unifiedError: true };
+				hackatimeData = { totalHours: 0, aiHours: 0, nonAiHours: 0, earliestHeartbeat: null, startDate: null, previousApprovedHours: 0, previousInternalHours: 0, hackatimeProjects: [], trustLevel: null, linkedBanned: false, linkedEmail: null, linkedSlackUid: null, beestEmail: null, beestSlackId: null, emailMismatch: false, unifiedDuplicate: false, unifiedError: true };
 			} finally {
 				hackatimeLoading = false;
 				// Default the reviewer's inputs to the DELTA of new Hackatime work
@@ -2089,6 +2090,7 @@
 													aiHours={hackatimeData.aiHours}
 													nonAiHours={hackatimeData.nonAiHours}
 													perProject={hackatimeData.hackatimeProjects.map((hp) => ({ name: hp.name, hours: hp.hours }))}
+													startDate={hackatimeData.startDate}
 												/>
 											</div>
 											{#if hackatimeData.linkedBanned || hackatimeData.emailMismatch || hackatimeData.trustLevel === 'red'}
