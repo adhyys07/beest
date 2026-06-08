@@ -2104,11 +2104,16 @@
 											<div class="ht-files">
 												<div class="ht-files-heading">Hours by file</div>
 												{#each hackatimeData.fileBreakdown as row}
-												<div class="ht-file-row">
-													<span class="ht-file-name">{row.file}</span>
-													<span class="ht-file-hours">{row.hours}h</span>
-												</div>
-											{/each}
+													<div class="ht-file-row">
+														<span class="ht-file-name">{row.file}</span>
+														<span class="ht-file-hours">{row.hours}h</span>
+													</div>
+												{/each}
+											</div>
+											{:else}
+											<div class="ht-files ht-files-empty">
+												<div class="ht-files-heading">Hours by file</div>
+												<div class="ht-files-empty-text">No file-level breakdown available from Hackatime.</div>
 											</div>
 											{/if}
 											
@@ -4755,4 +4760,67 @@
 	.admin-shell.light .approved-project-date { color: rgba(0,0,0,0.55); }
 
 	.link-btn { background: none; border: none; color: #93b4cd; cursor: pointer; padding: 0; font: inherit; text-decoration: underline; }
+
+	.ht-files {
+		margin-top: 1rem;
+		padding: 0.9rem 1rem;
+		border: 1px solid rgba(255, 255, 255, 0.12);
+		border-radius: 8px;
+		background: rgba(0, 0, 0, 0.14);
+	}
+
+	.ht-files-heading {
+		margin-bottom: 0.65rem;
+		font-size: 0.82rem;
+		font-weight: 700;
+		text-transform: uppercase;
+		letter-spacing: 0.06em;
+		color: #93b4cd;
+	}
+
+	.ht-file-row {
+		display: flex;
+		justify-content: space-between;
+		gap: 1rem;
+		padding: 0.35rem 0;
+		border-top: 1px solid rgba(255, 255, 255, 0.06);
+	}
+
+	.ht-file-row:first-of-type {
+		border-top: none;
+	}
+
+	.ht-file-name {
+		min-width: 0;
+		overflow-wrap: anywhere;
+		color: rgba(255, 255, 255, 0.92);
+	}
+
+	.ht-file-hours {
+		flex: none;
+		font-variant-numeric: tabular-nums;
+		color: #93b4cd;
+	}
+
+	.ht-files-empty-text {
+		color: rgba(255, 255, 255, 0.65);
+		font-size: 0.9rem;
+	}
+
+	.admin-shell.light .ht-files {
+		border-color: rgba(0, 0, 0, 0.12);
+		background: rgba(0, 0, 0, 0.03);
+	}
+
+	.admin-shell.light .ht-file-row {
+		border-top-color: rgba(0, 0, 0, 0.08);
+	}
+
+	.admin-shell.light .ht-file-name {
+		color: #1a1a1a;
+	}
+
+	.admin-shell.light .ht-files-empty-text {
+		color: rgba(0, 0, 0, 0.62);
+	}
 </style>
