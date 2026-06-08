@@ -23,6 +23,11 @@ import { HcaService } from '../hca/hca.service';
 import { fetchWithTimeout } from '../fetch.util';
 import { ProjectAirtableSyncService } from '../projects/project-airtable-sync.service';
 import { SlackService } from '../slack/slack.service';
+import { SlackNotifyService } from '../slack/slack-notify.service';
+import {
+  reviewApprovedDm,
+  reviewChangesNeededDm,
+} from '../slack/slack-notify.templates';
 import { ShopService } from '../shop/shop.service';
 import { getFileHoursForProject } from '../hackatime/hackatime-file-breakdown';
 
@@ -109,6 +114,7 @@ export class AdminService {
     private readonly hcaService: HcaService,
     private readonly airtableSync: ProjectAirtableSyncService,
     private readonly slackService: SlackService,
+    private readonly slackNotify: SlackNotifyService,
     private readonly shopService: ShopService,
   ) {
     this.hackatimeBaseUrl = this.configService.get(
@@ -795,7 +801,36 @@ export class AdminService {
     });
     await this.reviewRepo.save(review);
 
-    // 5. Audit log to the project owner (not the reviewer)
+    // 5. DM the builder about the decision (best-effort; never blocks review).
+    // Only the two reviewer-facing outcomes notify here — 'approved' and
+    // 'changes_needed'. The reviewer name is omitted when hidden from the owner.
+    if (status === 'approved' || status === 'changes_needed') {
+      const reviewerName = hideReviewerName
+        ? null
+        : (
+            await this.userRepo.findOne({
+              where: { id: reviewerId },
+              select: ['name'],
+            })
+          )?.name ?? null;
+      const dmInput = {
+        projectName: project.name,
+        projectLink: project.codeUrl ?? project.demoUrl ?? null,
+        reviewerName,
+        feedback: feedback || null,
+      };
+      const message =
+        status === 'approved'
+          ? reviewApprovedDm(dmInput)
+          : reviewChangesNeededDm(dmInput);
+      await this.slackNotify.dm(
+        project.user?.slackId,
+        message.text,
+        message.blocks,
+      );
+    }
+
+    // 6. Audit log to the project owner (not the reviewer)
     const label =
       status === 'approved'
         ? `Project "${project.name}" was approved by reviewer`
