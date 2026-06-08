@@ -16,8 +16,10 @@ interface ReviewDmInput {
   feedback: string | null;
 }
 
+// When the reviewer opts to stay anonymous (reviewerName === null) the DM
+// speaks in the team's voice ("We reviewed…") rather than naming a reviewer.
 function reviewerLabel(reviewerName: string | null): string {
-  return reviewerName ? `*${reviewerName}*` : 'A reviewer';
+  return reviewerName ? `*${reviewerName}*` : 'We';
 }
 
 function viewProjectButton(
