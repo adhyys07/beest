@@ -222,6 +222,8 @@ export class AdminController {
       status?: string;
       feedback?: string;
       internalNote?: string;
+      userNote?: string | null;
+      hideReviewerName?: boolean;
       overrideJustification?: string;
       overrideHours?: number;
       internalHours?: number;
@@ -273,6 +275,8 @@ export class AdminController {
         reviewerId,
         body.feedback ?? null,
         body.internalNote ?? null,
+        body.userNote,
+        body.hideReviewerName === true,
         body.overrideJustification ?? null,
       );
     }
@@ -283,6 +287,8 @@ export class AdminController {
       body.status,
       body.feedback ?? null,
       body.internalNote ?? null,
+      body.userNote,
+      body.hideReviewerName === true,
       body.overrideJustification ?? null,
       body.overrideHours ?? null,
       body.internalHours ?? null,

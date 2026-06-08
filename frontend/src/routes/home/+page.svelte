@@ -71,7 +71,14 @@
   let eventCountdown = $state({ days: 0, hours: 0, minutes: 0, seconds: 0, live: false });
   let creatingProject = $state(false);
   let editingProject = $state<any>(null);
-  type ProjectReview = { id: string; status: 'approved' | 'changes_needed'; feedback: string | null; reviewerName: string | null; createdAt: string };
+  type ProjectReview = {
+    id: string;
+    status: 'approved' | 'changes_needed';
+    feedback: string | null;
+    reviewerName: string | null;
+    hideReviewerName?: boolean;
+    createdAt: string;
+  };
   let editingProjectReviews = $state<ProjectReview[]>([]);
   let editingProjectReviewsLoading = $state(false);
   let editingProjectQueue = $state<{ total: number; position: number } | null>(null);
@@ -1488,7 +1495,9 @@
               <div class="review-feedback-card review-feedback-{review.status}">
                 <div class="review-feedback-header">
                   <span class="review-feedback-badge {review.status}">{review.status === 'changes_needed' ? 'Changes Needed' : 'Approved'}</span>
-                  {#if review.reviewerName}
+                  {#if review.hideReviewerName}
+                    <span class="review-feedback-reviewer">by a reviewer</span>
+                  {:else if review.reviewerName}
                     <span class="review-feedback-reviewer">by {review.reviewerName}</span>
                   {/if}
                   <span class="review-feedback-date">{formatLocal(review.createdAt, { year: 'numeric', month: 'short', day: 'numeric' })}</span>
@@ -1500,6 +1509,13 @@
                 {/if}
               </div>
             {/each}
+          </div>
+        {/if}
+
+        {#if editingProject?.reviewerUserNote}
+          <div class="persistent-reviewer-note">
+            <h3 class="persistent-reviewer-note-heading">Note from Reviewers</h3>
+            <p class="persistent-reviewer-note-text">{editingProject.reviewerUserNote}</p>
           </div>
         {/if}
 
@@ -1571,7 +1587,9 @@
             <div class="review-feedback-card review-feedback-{review.status}">
               <div class="review-feedback-header">
                 <span class="review-feedback-badge {review.status}">{review.status === 'changes_needed' ? 'Changes Needed' : 'Approved'}</span>
-                {#if review.reviewerName}
+                {#if review.hideReviewerName}
+                  <span class="review-feedback-reviewer">by a reviewer</span>
+                {:else if review.reviewerName}
                   <span class="review-feedback-reviewer">by {review.reviewerName}</span>
                 {/if}
                 <span class="review-feedback-date">{formatLocal(review.createdAt, { year: 'numeric', month: 'short', day: 'numeric' })}</span>
@@ -1583,6 +1601,13 @@
               {/if}
             </div>
           {/each}
+        </div>
+      {/if}
+
+      {#if editingProject?.reviewerUserNote}
+        <div class="persistent-reviewer-note">
+          <h3 class="persistent-reviewer-note-heading">Note from Reviewers</h3>
+          <p class="persistent-reviewer-note-text">{editingProject.reviewerUserNote}</p>
         </div>
       {/if}
 
@@ -4291,6 +4316,31 @@
   .review-feedback-empty {
     color: #7f796d;
     font-style: italic;
+  }
+
+  .persistent-reviewer-note {
+    margin: 0 0 28px;
+    max-width: 720px;
+    padding: 18px 20px;
+    background: rgba(147, 180, 205, 0.12);
+    border: 1px solid rgba(147, 180, 205, 0.35);
+    box-shadow: 6px 6px 0 rgba(0, 0, 0, 0.18);
+  }
+
+  .persistent-reviewer-note-heading {
+    margin: 0 0 8px;
+    font-family: "Stone Breaker", "Courier New", monospace;
+    font-size: 20px;
+    color: #e6f4fe;
+  }
+
+  .persistent-reviewer-note-text {
+    margin: 0;
+    font-family: "Courier New", monospace;
+    font-size: 15px;
+    line-height: 1.55;
+    color: #e6f4fe;
+    white-space: pre-wrap;
   }
 
   .resubmit-section {

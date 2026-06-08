@@ -3,6 +3,7 @@ import {
   BadRequestException,
   Logger,
   NotFoundException,
+  UnauthorizedException,
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { InjectRepository } from '@nestjs/typeorm';
@@ -23,6 +24,7 @@ import { HcaService } from '../hca/hca.service';
 import { fetchWithTimeout } from '../fetch.util';
 import { ProjectAirtableSyncService } from '../projects/project-airtable-sync.service';
 import { SlackService } from '../slack/slack.service';
+import { getFileHoursForProject } from '../hackatime/hackatime-file-breakdown';
 
 const VALID_PERMS = [
   'User',
@@ -36,8 +38,22 @@ const VALID_PERMS = [
 @Injectable()
 export class AdminService {
   private readonly logger = new Logger(AdminService.name);
+  private static readonly AI_BREAKDOWN_CATEGORIES = new Set([
+    'ai coding',
+    'browsing',
+    'meeting',
+    'communicating',
+  ]);
   private readonly hackatimeBaseUrl: string;
   private readonly hackatimeAdminKey: string | undefined;
+
+  private cleanReviewerUserNote(note: string | null | undefined): string | null {
+    if (note === undefined) return null;
+    if (note === null) return null;
+    const trimmed = note.trim();
+    if (!trimmed) return null;
+    return trimmed.slice(0, 2000);
+  }
 
   // DAU cache (5-minute TTL)
   private dauCache: { count: number; timestamp: number } | null = null;
@@ -374,6 +390,8 @@ export class AdminService {
     reviewerId: string,
     feedback: string | null,
     internalNote: string | null,
+    userNote: string | null | undefined,
+    hideReviewerName: boolean,
     overrideJustification: string | null,
   ) {
     const project = await this.projectRepo.findOne({
@@ -383,6 +401,11 @@ export class AdminService {
     if (!project) throw new NotFoundException('Project not found');
     if (project.userId === reviewerId) {
       throw new BadRequestException('You cannot review your own project');
+    }
+
+    if (userNote !== undefined) {
+      project.user.reviewerUserNote = this.cleanReviewerUserNote(userNote);
+      await this.userRepo.save(project.user);
     }
 
     // 1. Reject the project
@@ -396,6 +419,7 @@ export class AdminService {
       status: 'ban',
       feedback: feedback || null,
       internalNote: internalNote || null,
+      hideReviewerName,
       overrideJustification: overrideJustification || null,
     });
     await this.reviewRepo.save(review);
@@ -522,6 +546,7 @@ export class AdminService {
             id: p.user?.id,
             name: isSuperAdmin ? p.user?.name : null,
             slackId: p.user?.slackId,
+            reviewerUserNote: p.user?.reviewerUserNote ?? null,
           },
           latestSubmission: latestSub ? {
             id: latestSub.id,
@@ -543,6 +568,8 @@ export class AdminService {
     status: string,
     feedback: string | null,
     internalNote: string | null,
+    userNote: string | null | undefined,
+    hideReviewerName: boolean,
     overrideJustification: string | null,
     overrideHours: number | null,
     internalHours: number | null,
@@ -554,6 +581,11 @@ export class AdminService {
     if (!project) throw new NotFoundException('Project not found');
     if (project.userId === reviewerId) {
       throw new BadRequestException('You cannot review your own project');
+    }
+
+    if (userNote !== undefined) {
+      project.user.reviewerUserNote = this.cleanReviewerUserNote(userNote);
+      await this.userRepo.save(project.user);
     }
 
     const previousStatus = project.status;
@@ -720,6 +752,7 @@ export class AdminService {
       status,
       feedback: feedback || null,
       internalNote: internalNote || null,
+      hideReviewerName,
       overrideJustification: overrideJustification || null,
     });
     await this.reviewRepo.save(review);
@@ -840,6 +873,7 @@ export class AdminService {
       ...(includeInternal ? { internalNote: r.internalNote } : {}),
       overrideJustification: r.overrideJustification,
       reviewerName: r.reviewer?.name ?? null,
+      hideReviewerName: r.hideReviewerName ?? false,
       createdAt: r.createdAt,
     }));
   }
@@ -915,7 +949,11 @@ export class AdminService {
       hackatimeProjects: [],
       categories: [],
       totalHours: 0,
+      aiHours: 0,
+      nonAiHours: 0,
+      fileBreakdown: [],
       earliestHeartbeat: null,
+      startDate: AdminService.HACKATIME_EVENT_START,
       previousApprovedHours: project?.overrideHours ?? 0,
       previousInternalHours: project?.internalHours ?? 0,
       trustLevel: null,
@@ -945,6 +983,173 @@ export class AdminService {
       },
       body: JSON.stringify(body),
     });
+  }
+
+  private buildHackatimeStatsQuery(
+    projectNames: string[],
+    cutoffDate: Date,
+    options?: { totalSeconds?: boolean; categories?: string[]; featuresProjects?: boolean },
+  ): string {
+    const params = new URLSearchParams({
+      start_date: cutoffDate.toISOString().split('T')[0],
+      filter_by_project: projectNames.join(','),
+    });
+    if (options?.totalSeconds) {
+      params.set('total_seconds', 'true');
+    }
+    if (options?.featuresProjects) {
+      params.set('features', 'projects');
+    }
+    if (options?.categories && options.categories.length > 0) {
+      params.set('filter_by_category', options.categories.join(','));
+    }
+    return params.toString().replace(/\+/g, '%20').replace(/%2C/g, ',');
+  }
+
+  private async fetchHackatimeStatsTotalSeconds(
+    hackatimeUserId: string | number,
+    projectNames: string[],
+    accessToken: string,
+    cutoffDate: Date,
+    categories?: string[],
+  ): Promise<number> {
+    if (projectNames.length === 0) return 0;
+
+    const qs = this.buildHackatimeStatsQuery(projectNames, cutoffDate, {
+      totalSeconds: true,
+      categories,
+    });
+    const uri = `${this.hackatimeBaseUrl}/api/v1/users/${encodeURIComponent(String(hackatimeUserId))}/stats?${qs}`;
+
+    const response = await fetchWithTimeout(uri, {
+      method: 'GET',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${accessToken}`,
+      },
+    });
+
+    if (!response.ok) {
+      if (response.status === 401 || response.status === 403) {
+        throw new UnauthorizedException(
+          'Hackatime denied access to the linked account stats. Enable "Public Stats Lookup" in Hackatime, or re-link the account.',
+        );
+      }
+      throw new Error(`Hackatime stats returned ${response.status} for ${hackatimeUserId}`);
+    }
+
+    const responseData = await response.json();
+    const totalSeconds = responseData?.total_seconds;
+    if (typeof totalSeconds !== 'number') {
+      throw new Error(
+        `Hackatime stats response missing total_seconds: ${JSON.stringify(responseData).slice(0, 200)}`,
+      );
+    }
+    return totalSeconds;
+  }
+
+  private async fetchHackatimeProjectDurations(
+    hackatimeUserId: string | number,
+    projectNames: string[],
+    accessToken: string,
+    cutoffDate: Date,
+  ): Promise<Map<string, number>> {
+    const durationsMap = new Map<string, number>();
+    for (const projectName of projectNames) {
+      durationsMap.set(projectName, 0);
+    }
+    if (projectNames.length === 0) return durationsMap;
+
+    const qs = this.buildHackatimeStatsQuery(projectNames, cutoffDate, {
+      featuresProjects: true,
+    });
+    const uri = `${this.hackatimeBaseUrl}/api/v1/users/${encodeURIComponent(String(hackatimeUserId))}/stats?${qs}`;
+
+    try {
+      const response = await fetchWithTimeout(uri, {
+        method: 'GET',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${accessToken}`,
+        },
+      });
+
+      if (!response.ok) {
+        return durationsMap;
+      }
+
+      const responseData = await response.json();
+      const projects = responseData?.data?.projects ?? responseData?.projects ?? [];
+      if (!Array.isArray(projects)) {
+        return durationsMap;
+      }
+
+      for (const project of projects) {
+        const name = project?.name;
+        if (typeof name === 'string' && projectNames.includes(name)) {
+          const duration = typeof project?.total_seconds === 'number' ? project.total_seconds : Number(project?.total_seconds);
+          durationsMap.set(name, Number.isFinite(duration) && duration > 0 ? duration : 0);
+        }
+      }
+    } catch (error) {
+      this.logger.warn(`Hackatime project duration fetch failed for ${hackatimeUserId}: ${error}`);
+    }
+
+    return durationsMap;
+  }
+
+  private async fetchHackatimeCategoryBreakdown(
+    hackatimeUserId: string | number,
+    projectNames: string[],
+    accessToken: string,
+    cutoffDate: Date,
+  ): Promise<{ name: string; totalSeconds: number; percent: number }[]> {
+    if (projectNames.length === 0) return [];
+
+    const qs = this.buildHackatimeStatsQuery(projectNames, cutoffDate);
+    const uri = `${this.hackatimeBaseUrl}/api/v1/users/${encodeURIComponent(String(hackatimeUserId))}/stats?${qs}`;
+
+    try {
+      const response = await fetchWithTimeout(uri, {
+        method: 'GET',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${accessToken}`,
+        },
+      });
+
+      if (!response.ok) {
+        return [];
+      }
+
+      const statsBody = await response.json();
+      const rawCats = statsBody?.data?.categories ?? statsBody?.categories ?? [];
+      if (!Array.isArray(rawCats)) return [];
+
+      const parsed = rawCats
+        .map((c: { name?: unknown; total_seconds?: unknown }) => {
+          const secs = typeof c?.total_seconds === 'number' ? c.total_seconds : Number(c?.total_seconds);
+          return {
+            name: typeof c?.name === 'string' ? c.name : '',
+            totalSeconds: Number.isFinite(secs) && secs > 0 ? secs : 0,
+          };
+        })
+        .filter((c) => c.name && c.totalSeconds > 0);
+
+      const sum = parsed.reduce((s, c) => s + c.totalSeconds, 0);
+      if (sum <= 0) return [];
+
+      return parsed
+        .map((c) => ({
+          name: c.name,
+          totalSeconds: c.totalSeconds,
+          percent: Math.round((c.totalSeconds / sum) * 1000) / 10,
+        }))
+        .sort((a, b) => b.percent - a.percent);
+    } catch (error) {
+      this.logger.warn(`Hackatime category stats failed for ${hackatimeUserId}: ${error}`);
+      return [];
+    }
   }
 
   async getProjectHackatime(projectId: string, isSuperAdmin: boolean) {
@@ -1062,69 +1267,63 @@ export class AdminService {
         if (hackatimeNames.length > 0) {
           const nameSet = new Set(hackatimeNames);
           const matchedRaw = allProjects.filter((p) => nameSet.has(p.name));
+          const projectNames = matchedRaw.map((p) => p.name);
 
-          // Fetch event-window hours from spans per project: the admin
-          // /user/projects total_duration is lifetime, which would surface
-          // pre-event hours to reviewers. end_date is padded by one day so
-          // today's spans are fully included even with timezone edges.
-          const endDatePadded = AdminService.ymdUtc(
-            new Date(Date.now() + 86400_000),
-          );
-          const spansResults = await Promise.allSettled(
-            matchedRaw.map((p) =>
-              this.hackatimeGet(
-                `/api/v1/users/${encodeURIComponent(String(hackatimeUserId))}/heartbeats/spans` +
-                  `?start_date=${AdminService.HACKATIME_EVENT_START}&end_date=${endDatePadded}` +
-                  `&project=${encodeURIComponent(p.name)}`,
-              ).then(async (r) =>
-                r.ok
-                  ? ((await r.json()) as {
-                      spans?: { start_time?: number; end_time?: number; duration?: number }[];
-                    })
-                  : null,
-              ),
+          const hackatimeCutoffDate = new Date(`${AdminService.HACKATIME_EVENT_START}T00:00:00.000Z`);
+          const [totalSeconds, aiSeconds, perProjectDurations, categoryBreakdown] = await Promise.all([
+            this.fetchHackatimeStatsTotalSeconds(
+              hackatimeUserId,
+              projectNames,
+              user.hackatimeToken ?? '',
+              hackatimeCutoffDate,
+            ),
+            this.fetchHackatimeStatsTotalSeconds(
+              hackatimeUserId,
+              projectNames,
+              user.hackatimeToken ?? '',
+              hackatimeCutoffDate,
+              Array.from(AdminService.AI_BREAKDOWN_CATEGORIES),
+            ),
+            this.fetchHackatimeProjectDurations(
+              hackatimeUserId,
+              projectNames,
+              user.hackatimeToken ?? '',
+              hackatimeCutoffDate,
+            ),
+            this.fetchHackatimeCategoryBreakdown(
+              hackatimeUserId,
+              projectNames,
+              user.hackatimeToken ?? '',
+              hackatimeCutoffDate,
+            ),
+          ]);
+
+          const endDate = AdminService.ymdUtc(new Date(Date.now() + 86_400_000));
+          const fileBreakdowns = await Promise.all(
+            projectNames.map((projectName) =>
+              getFileHoursForProject({
+                baseUrl: this.hackatimeBaseUrl,
+                adminKey: this.hackatimeAdminKey!,
+                hackatimeUserId,
+                projectName,
+                startDate: AdminService.HACKATIME_EVENT_START,
+                endDate,
+                debugLog: (message) => this.logger.warn(message),
+              }),
             ),
           );
+          const fileBreakdownRows = [...fileBreakdowns.flat()]
+            .reduce<Map<string, number>>((acc, row) => {
+              acc.set(row.file, Math.round(((acc.get(row.file) ?? 0) + row.hours) * 10) / 10);
+              return acc;
+            }, new Map<string, number>());
+          const fileBreakdown = [...fileBreakdownRows.entries()]
+            .map(([file, hours]) => ({ file, hours }))
+            .sort((a, b) => b.hours - a.hours);
 
-          // Pull the Wakatime-compatible categories summary so reviewers can see
-          // how much of the time was "AI Coding" vs regular coding. One stats
-          // call covers all linked projects via filter_by_project.
-          try {
-            const statsRes = await this.hackatimeGet(
-              `/api/v1/users/${encodeURIComponent(String(hackatimeUserId))}/stats` +
-                `?start_date=${AdminService.HACKATIME_EVENT_START}&end_date=${endDatePadded}` +
-                `&filter_by_project=${encodeURIComponent(matchedRaw.map((p) => p.name).join(','))}`,
-            );
-            if (statsRes.ok) {
-              const statsBody = await statsRes.json();
-              const rawCats = statsBody?.data?.categories ?? statsBody?.categories ?? [];
-              if (Array.isArray(rawCats)) {
-                const parsed = rawCats
-                  .map((c: { name?: unknown; total_seconds?: unknown }) => {
-                    const secs = typeof c?.total_seconds === 'number' ? c.total_seconds : Number(c?.total_seconds);
-                    return {
-                      name: typeof c?.name === 'string' ? c.name : '',
-                      totalSeconds: Number.isFinite(secs) && secs > 0 ? secs : 0,
-                    };
-                  })
-                  .filter((c) => c.name && c.totalSeconds > 0);
-                const sum = parsed.reduce((s, c) => s + c.totalSeconds, 0);
-                if (sum > 0) {
-                  categories = parsed
-                    .map((c) => ({
-                      name: c.name,
-                      totalSeconds: c.totalSeconds,
-                      percent: Math.round((c.totalSeconds / sum) * 1000) / 10,
-                    }))
-                    .sort((a, b) => b.percent - a.percent);
-                }
-              }
-            }
-          } catch (err) {
-            this.logger.warn(`Hackatime category stats failed for project ${projectId}: ${err}`);
-          }
+          categories = categoryBreakdown;
 
-          matched = matchedRaw.map((p, i) => {
+          matched = matchedRaw.map((p) => {
             const fhRaw = p.first_heartbeat ?? null;
             let firstHeartbeat: number | null = null;
             if (fhRaw !== null && fhRaw !== undefined) {
@@ -1134,66 +1333,68 @@ export class AdminService {
               }
             }
 
-            let seconds = 0;
-            const sr = spansResults[i];
-            if (sr.status === 'fulfilled' && sr.value?.spans) {
-              for (const span of sr.value.spans) {
-                if (
-                  typeof span.duration === 'number' &&
-                  Number.isFinite(span.duration) &&
-                  span.duration > 0
-                ) {
-                  seconds += span.duration;
-                  continue;
-                }
-                if (
-                  typeof span.start_time === 'number' &&
-                  typeof span.end_time === 'number' &&
-                  Number.isFinite(span.start_time) &&
-                  Number.isFinite(span.end_time) &&
-                  span.end_time > span.start_time
-                ) {
-                  // start/end may arrive as seconds or milliseconds.
-                  const diff = span.end_time - span.start_time;
-                  seconds += diff > 1e9 ? diff / 1000 : diff;
-                }
-              }
-            }
-
             return {
               name: p.name,
-              hours: Math.round((seconds / 3600) * 10) / 10,
+              hours: Math.round(((perProjectDurations.get(p.name) ?? 0) / 3600) * 10) / 10,
               languages: p.languages ?? [],
               firstHeartbeat,
             };
           });
+
+          const round1 = (n: number) => Math.round(n * 10) / 10;
+          const totalRounded = round1(totalSeconds / 3600);
+          const aiRounded = round1(aiSeconds / 3600);
+          const nonAiRounded = Math.max(0, round1(totalRounded - aiRounded));
+
+          const heartbeatTimes = matched
+            .map((p) => p.firstHeartbeat)
+            .filter((t): t is number => t !== null);
+          const earliestHeartbeat = heartbeatTimes.length > 0 ? Math.min(...heartbeatTimes) : null;
+
+          const previousApprovedHours = project.overrideHours ?? 0;
+          const previousInternalHours = project.internalHours ?? 0;
+
+          return {
+            projectId,
+            hackatimeProjects: matched,
+            categories,
+            totalHours: totalRounded,
+            aiHours: aiRounded,
+            nonAiHours: nonAiRounded,
+            earliestHeartbeat,
+            startDate: AdminService.HACKATIME_EVENT_START,
+            previousApprovedHours,
+            previousInternalHours,
+            fileBreakdown,
+            trustLevel,
+            linkedBanned,
+            linkedEmail: isSuperAdmin ? linkedEmail : null,
+            linkedSlackUid,
+            beestEmail: isSuperAdmin ? (user.email ?? null) : null,
+            beestSlackId: user.slackId ?? null,
+            emailMismatch,
+            unifiedDuplicate: unifiedResult.duplicate,
+            unifiedError: unifiedResult.error,
+            debug,
+          };
         }
       }
 
-      const totalHours = Math.round(
-        matched.reduce((sum, p) => sum + p.hours, 0) * 10,
-      ) / 10;
-
-      const heartbeatTimes = matched
-        .map((p) => p.firstHeartbeat)
-        .filter((t): t is number => t !== null);
-      const earliestHeartbeat = heartbeatTimes.length > 0 ? Math.min(...heartbeatTimes) : null;
-
-      // Currently-applied approved hours on the project (the additive base for
-      // delta-mode review UI). When a project was approved → changes_needed,
-      // these are 0 even if a historical approved submission exists, signaling
-      // the FE to switch the input back to cumulative-mode for the next review.
       const previousApprovedHours = project.overrideHours ?? 0;
       const previousInternalHours = project.internalHours ?? 0;
 
       return {
         projectId,
-        hackatimeProjects: matched,
+        hackatimeProjects: [],
         categories,
-        totalHours,
-        earliestHeartbeat,
+        totalHours: 0,
+        aiHours: 0,
+        nonAiHours: 0,
+        earliestHeartbeat: null,
+        startDate: AdminService.HACKATIME_EVENT_START,
         previousApprovedHours,
         previousInternalHours,
+        fileBreakdown: [],
         trustLevel,
         linkedBanned,
         linkedEmail: isSuperAdmin ? linkedEmail : null,
@@ -1212,7 +1413,11 @@ export class AdminService {
         hackatimeProjects: [],
         categories: [],
         totalHours: 0,
+        aiHours: 0,
+        nonAiHours: 0,
+        fileBreakdown: [],
         earliestHeartbeat: null,
+        startDate: AdminService.HACKATIME_EVENT_START,
         previousApprovedHours: project.overrideHours ?? 0,
         previousInternalHours: project.internalHours ?? 0,
         trustLevel: null,
@@ -1377,7 +1582,6 @@ export class AdminService {
     this.unreviewedHoursCache = { payload, timestamp: Date.now() };
     return payload;
   }
-
   // ── Daily Active Users ──
 
   async getDailyActiveUsers(): Promise<{ count: number }> {

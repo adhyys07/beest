@@ -346,6 +346,8 @@ export class AuditService {
       feedback,
       'Banned via audit panel',
       null,
+      false,
+      null,
     );
     return { success: true };
   }

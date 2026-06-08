@@ -2,6 +2,7 @@
 	import DauChart from './DauChart.svelte';
 	import SignupsChart from './SignupsChart.svelte';
 	import UserFunnel from './UserFunnel.svelte';
+	import ProjectHourBreakdown from '$lib/components/ProjectHourBreakdown.svelte';
 	import TimelapsePanel from '$lib/components/admin/TimelapsePanel.svelte';
 	import CardGrantModal from '$lib/components/admin/CardGrantModal.svelte';
 	let { data } = $props();
@@ -115,7 +116,7 @@
 		aiUse: string | null;
 		createdAt: string;
 		updatedAt: string;
-		user: { id: string; name: string | null; slackId: string | null };
+		user: { id: string; name: string | null; slackId: string | null; reviewerUserNote: string | null };
 		latestSubmission: { id: string; changeDescription: string | null; minHoursConfirmed: boolean; reviewerNote: string | null; status: string; createdAt: string } | null;
 	}
 
@@ -136,7 +137,10 @@
 	// Hackatime detail expansion
 	interface HackatimeDetail {
 		totalHours: number;
+		aiHours: number;
+		nonAiHours: number;
 		earliestHeartbeat: number | null;
+		startDate: string | null;
 		previousApprovedHours: number;
 		previousInternalHours: number;
 		trustLevel: string | null;
@@ -150,6 +154,7 @@
 		categories?: { name: string; totalSeconds: number; percent: number }[];
 		unifiedDuplicate: boolean;
 		unifiedError: boolean;
+		fileBreakdown: { file: string; hours: number }[];
 	}
 	let expandedProjectId = $state<string | null>(null);
 	let hackatimeData = $state<HackatimeDetail | null>(null);
@@ -158,6 +163,8 @@
 	let lastAutoJustification = $state('');
 	let userFeedback = $state('');
 	let internalNote = $state('');
+	let persistentUserNote = $state('');
+	let hideReviewerName = $state(false);
 	let reviewSubmitting = $state(false);
 	let customHours = $state(0);
 	let userFacingHours = $state(0);
@@ -180,6 +187,7 @@
 		internalNote?: string | null;
 		overrideJustification: string | null;
 		reviewerName: string | null;
+		hideReviewerName: boolean;
 		createdAt: string;
 	}
 	let pastReviews = $state<ReviewRecord[]>([]);
@@ -221,6 +229,8 @@
 					status,
 					feedback: userFeedback.trim() || null,
 					internalNote: internalNote.trim() || null,
+					userNote: persistentUserNote.trim() || null,
+					hideReviewerName,
 					overrideJustification: overrideJustification.trim() || null,
 					overrideHours: userFacingHours,
 					internalHours: customHours,
@@ -228,7 +238,10 @@
 			});
 			if (res.ok) {
 				const proj = allProjects.find(p => p.id === expandedProjectId);
-				if (proj) proj.status = status;
+				if (proj) {
+					proj.status = status;
+					proj.user.reviewerUserNote = persistentUserNote.trim() || null;
+				}
 				// Reload reviews
 				await loadReviews(expandedProjectId);
 			}
@@ -327,7 +340,9 @@
 			expandedProjectId = null;
 			hackatimeData = null;
 			userFeedback = '';
-		internalNote = '';
+			internalNote = '';
+			persistentUserNote = '';
+			hideReviewerName = false;
 			projectDevlogs = [];
 			return;
 		}
@@ -338,10 +353,12 @@
 		internalNote = '';
 		overrideJustification = '';
 		lastAutoJustification = '';
+		hideReviewerName = false;
 		pastReviews = [];
 		projectDevlogs = [];
 
 		const proj = allProjects.find(p => p.id === projectId);
+		persistentUserNote = proj?.user?.reviewerUserNote ?? '';
 		loadReviews(projectId);
 		loadProjectDevlogs(projectId);
 		if (proj?.status === 'unreviewed' || proj?.status === 'approved') {
@@ -351,10 +368,10 @@
 				if (res.ok) {
 					hackatimeData = await res.json();
 				} else {
-					hackatimeData = { totalHours: 0, earliestHeartbeat: null, previousApprovedHours: 0, previousInternalHours: 0, hackatimeProjects: [], trustLevel: null, linkedBanned: false, linkedEmail: null, linkedSlackUid: null, beestEmail: null, beestSlackId: null, emailMismatch: false, unifiedDuplicate: false, unifiedError: true };
+					hackatimeData = { totalHours: 0, aiHours: 0, nonAiHours: 0, fileBreakdown: [], earliestHeartbeat: null, startDate: null, previousApprovedHours: 0, previousInternalHours: 0, hackatimeProjects: [], trustLevel: null, linkedBanned: false, linkedEmail: null, linkedSlackUid: null, beestEmail: null, beestSlackId: null, emailMismatch: false, unifiedDuplicate: false, unifiedError: true };
 				}
 			} catch {
-				hackatimeData = { totalHours: 0, earliestHeartbeat: null, previousApprovedHours: 0, previousInternalHours: 0, hackatimeProjects: [], trustLevel: null, linkedBanned: false, linkedEmail: null, linkedSlackUid: null, beestEmail: null, beestSlackId: null, emailMismatch: false, unifiedDuplicate: false, unifiedError: true };
+				hackatimeData = { totalHours: 0, aiHours: 0, nonAiHours: 0, fileBreakdown: [], earliestHeartbeat: null, startDate: null, previousApprovedHours: 0, previousInternalHours: 0, hackatimeProjects: [], trustLevel: null, linkedBanned: false, linkedEmail: null, linkedSlackUid: null, beestEmail: null, beestSlackId: null, emailMismatch: false, unifiedDuplicate: false, unifiedError: true };
 			} finally {
 				hackatimeLoading = false;
 				// Default the reviewer's inputs to the DELTA of new Hackatime work
@@ -2071,6 +2088,35 @@
 													<span class="ht-delta">prev approved: {hackatimeData.previousApprovedHours}h — new Hackatime since: {Math.round((hackatimeData.totalHours - hackatimeData.previousApprovedHours) * 10) / 10}h</span>
 												{/if}
 											</div>
+											<div class="ht-breakdown-panel">
+												<ProjectHourBreakdown
+													title="Project Hackatime Hours"
+													perProjectLabel="Linked project hours"
+													totalHours={hackatimeData.totalHours}
+													aiHours={hackatimeData.aiHours}
+													nonAiHours={hackatimeData.nonAiHours}
+													perProject={hackatimeData.hackatimeProjects.map((hp) => ({ name: hp.name, hours: hp.hours }))}
+													startDate={hackatimeData.startDate}
+												/>
+											</div>
+
+											{#if hackatimeData.fileBreakdown?.length}
+											<div class="ht-files">
+												<div class="ht-files-heading">Hours by file</div>
+												{#each hackatimeData.fileBreakdown as row}
+													<div class="ht-file-row">
+														<span class="ht-file-name">{row.file}</span>
+														<span class="ht-file-hours">{row.hours}h</span>
+													</div>
+												{/each}
+											</div>
+											{:else}
+											<div class="ht-files ht-files-empty">
+												<div class="ht-files-heading">Hours by file</div>
+												<div class="ht-files-empty-text">No file-level breakdown available from Hackatime.</div>
+											</div>
+											{/if}
+											
 											{#if hackatimeData.linkedBanned || hackatimeData.emailMismatch || hackatimeData.trustLevel === 'red'}
 												<div class="ht-ownership-alert">
 													{#if hackatimeData.emailMismatch}
@@ -2179,10 +2225,22 @@
 
 									<div class="user-feedback-box">
 										<label class="user-feedback-label">
+											User-Wide Reviewer Note:
+											<textarea class="user-feedback" bind:value={persistentUserNote} rows="4" placeholder="Persistent note shown to this builder across all of their projects..."></textarea>
+										</label>
+									</div>
+
+									<div class="user-feedback-box">
+										<label class="user-feedback-label">
 											Internal Note:
 											<textarea class="user-feedback" bind:value={internalNote} rows="3" placeholder="Private note for reviewers only — not visible to the user..."></textarea>
 										</label>
 									</div>
+
+									<label class="review-anonymous-toggle">
+										<input type="checkbox" bind:checked={hideReviewerName} />
+										<span>Hide my name from the project owner</span>
+									</label>
 
 									<div class="review-actions">
 										<button class="review-btn review-btn-approve" onclick={() => reviewProject('approved')} disabled={reviewSubmitting || !justificationOk}>Approve</button>
@@ -2225,6 +2283,9 @@
 											<div class="review-card-header">
 												<span class="badge badge-{review.status} badge-sm">{review.status}</span>
 												<span class="review-card-reviewer">{review.reviewerName ?? 'Unknown'}</span>
+												{#if review.hideReviewerName}
+													<span class="review-card-anonymous">hidden from owner</span>
+												{/if}
 												<span class="review-card-date">{formatDate(review.createdAt)}</span>
 											</div>
 											{#if review.feedback}
@@ -3293,6 +3354,22 @@
 		color: #aaa;
 	}
 
+	.review-anonymous-toggle {
+		display: flex;
+		align-items: center;
+		gap: 0.45rem;
+		margin: 0.15rem 0 0.8rem;
+		color: #cfcfcf;
+		font-size: 0.85rem;
+		cursor: pointer;
+	}
+
+	.review-anonymous-toggle input {
+		width: 0.95rem;
+		height: 0.95rem;
+		accent-color: #5b9bd5;
+	}
+
 	.user-feedback {
 		background: #1e1e1e;
 		border: 2px solid #777;
@@ -3547,6 +3624,18 @@
 		font-weight: 600;
 	}
 
+	.review-card-anonymous {
+		font-size: 0.72rem;
+		font-weight: 700;
+		text-transform: uppercase;
+		letter-spacing: 0.04em;
+		color: #8ec0ec;
+		background: rgba(91, 155, 213, 0.12);
+		border: 1px solid rgba(91, 155, 213, 0.35);
+		border-radius: 999px;
+		padding: 0.08rem 0.4rem;
+	}
+
 	.review-card-date {
 		color: #777;
 		margin-left: auto;
@@ -3761,6 +3850,15 @@
 		padding: 0.35rem 0.6rem;
 		font-size: 0.8rem;
 		color: #ddd;
+	}
+
+	.ht-breakdown-panel {
+		margin: 1rem 0;
+		--surface: #181818;
+		--border: #3f3f3f;
+		--shadow-soft: none;
+		--muted: #aaa;
+		--surface-border: #2a2a2a;
 	}
 
 	.ht-project-name {
@@ -4371,6 +4469,13 @@
 
 	/* Hackatime detail */
 	.admin-shell.light .ht-header { color: #333; }
+	.admin-shell.light .ht-breakdown-panel {
+		--surface: #f5f4f1;
+		--border: #d9d3c8;
+		--shadow-soft: none;
+		--muted: #666;
+		--surface-border: #eae4da;
+	}
 	.admin-shell.light .ht-total { color: #2a6699; }
 	.admin-shell.light .ht-project { background: #f5f4f1; border-color: #555; color: #333; }
 	.admin-shell.light .ht-project-name { color: #1a1a1a; }
@@ -4410,7 +4515,13 @@
 	.admin-shell.light .reviews-heading { color: #333; }
 	.admin-shell.light .review-card { background: #f5f4f1; border-color: #666; }
 	.admin-shell.light .review-card-reviewer { color: #222; }
+	.admin-shell.light .review-card-anonymous {
+		color: #2e6c9b;
+		background: rgba(91, 155, 213, 0.08);
+		border-color: rgba(91, 155, 213, 0.25);
+	}
 	.admin-shell.light .review-card-date { color: #777; }
+	.admin-shell.light .review-anonymous-toggle { color: #333; }
 	.admin-shell.light .review-card-label { color: #666; }
 	.admin-shell.light .review-card-text { color: #333; }
 	.admin-shell.light .review-card-internal { background: rgba(180, 140, 50, 0.08); }
@@ -4649,4 +4760,67 @@
 	.admin-shell.light .approved-project-date { color: rgba(0,0,0,0.55); }
 
 	.link-btn { background: none; border: none; color: #93b4cd; cursor: pointer; padding: 0; font: inherit; text-decoration: underline; }
+
+	.ht-files {
+		margin-top: 1rem;
+		padding: 0.9rem 1rem;
+		border: 1px solid rgba(255, 255, 255, 0.12);
+		border-radius: 8px;
+		background: rgba(0, 0, 0, 0.14);
+	}
+
+	.ht-files-heading {
+		margin-bottom: 0.65rem;
+		font-size: 0.82rem;
+		font-weight: 700;
+		text-transform: uppercase;
+		letter-spacing: 0.06em;
+		color: #93b4cd;
+	}
+
+	.ht-file-row {
+		display: flex;
+		justify-content: space-between;
+		gap: 1rem;
+		padding: 0.35rem 0;
+		border-top: 1px solid rgba(255, 255, 255, 0.06);
+	}
+
+	.ht-file-row:first-of-type {
+		border-top: none;
+	}
+
+	.ht-file-name {
+		min-width: 0;
+		overflow-wrap: anywhere;
+		color: rgba(255, 255, 255, 0.92);
+	}
+
+	.ht-file-hours {
+		flex: none;
+		font-variant-numeric: tabular-nums;
+		color: #93b4cd;
+	}
+
+	.ht-files-empty-text {
+		color: rgba(255, 255, 255, 0.65);
+		font-size: 0.9rem;
+	}
+
+	.admin-shell.light .ht-files {
+		border-color: rgba(0, 0, 0, 0.12);
+		background: rgba(0, 0, 0, 0.03);
+	}
+
+	.admin-shell.light .ht-file-row {
+		border-top-color: rgba(0, 0, 0, 0.08);
+	}
+
+	.admin-shell.light .ht-file-name {
+		color: #1a1a1a;
+	}
+
+	.admin-shell.light .ht-files-empty-text {
+		color: rgba(0, 0, 0, 0.62);
+	}
 </style>
