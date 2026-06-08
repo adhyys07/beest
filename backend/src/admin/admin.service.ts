@@ -1311,13 +1311,12 @@ export class AdminService {
               }),
             ),
           );
-          const fileBreakdown = fileBreakdowns
-            .flat()
+          const fileBreakdownRows = [...fileBreakdowns.flat()]
             .reduce<Map<string, number>>((acc, row) => {
               acc.set(row.file, Math.round(((acc.get(row.file) ?? 0) + row.hours) * 10) / 10);
               return acc;
             }, new Map<string, number>());
-          const fileBreakdownRows = [...fileBreakdown.entries()]
+          const fileBreakdown = [...fileBreakdownRows.entries()]
             .map(([file, hours]) => ({ file, hours }))
             .sort((a, b) => b.hours - a.hours);
 
@@ -1361,11 +1360,11 @@ export class AdminService {
             totalHours: totalRounded,
             aiHours: aiRounded,
             nonAiHours: nonAiRounded,
-            fileBreakdown: fileBreakdownRows,
             earliestHeartbeat,
             startDate: AdminService.HACKATIME_EVENT_START,
             previousApprovedHours,
             previousInternalHours,
+            fileBreakdown,
             trustLevel,
             linkedBanned,
             linkedEmail: isSuperAdmin ? linkedEmail : null,
@@ -1390,11 +1389,11 @@ export class AdminService {
         totalHours: 0,
         aiHours: 0,
         nonAiHours: 0,
-        fileBreakdown: [],
         earliestHeartbeat: null,
         startDate: AdminService.HACKATIME_EVENT_START,
         previousApprovedHours,
         previousInternalHours,
+        fileBreakdown: [],
         trustLevel,
         linkedBanned,
         linkedEmail: isSuperAdmin ? linkedEmail : null,
