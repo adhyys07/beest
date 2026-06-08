@@ -25,7 +25,7 @@ export class SlackNotifyService {
     this.configured = !!this.botToken;
     if (!this.configured) {
       this.logger.warn(
-        'SLACK_NOTIFY_BOT_TOKEN not set — Slack DM notifications disabled',
+        'SLACK_NOTIFY_BOT_TOKEN not set; Slack DM notifications disabled',
       );
     }
   }

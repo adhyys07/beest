@@ -1,6 +1,6 @@
 /**
  * Block Kit templates for builder DM notifications. Ported from the
- * "Beest Crabby" relay, with reviewer impersonation removed — messages are
+ * "Beest Crabby" relay, with reviewer impersonation removed. Messages are
  * sent from our own bot, and the reviewer name is shown as plain text only
  * when it isn't hidden (`reviewerName === null` → "A reviewer").
  */
@@ -116,7 +116,7 @@ export function reviewChangesNeededDm(input: ReviewDmInput): DmMessage {
       elements: [
         {
           type: 'mrkdwn',
-          text: "Don't give up — address the feedback and ship again!",
+          text: "Don't give up! Address the feedback and ship again.",
         },
       ],
     },
@@ -259,7 +259,7 @@ export function fraudClearedDm(input: {
       type: 'section',
       text: {
         type: 'mrkdwn',
-        text: `Your project *${input.projectName}* passed final review — your Pipes have been added to your balance. :yay:`,
+        text: `Your project *${input.projectName}* passed final review, and your Pipes have been added to your balance. :yay:`,
       },
     },
     ...viewProjectButton(input.projectLink),
