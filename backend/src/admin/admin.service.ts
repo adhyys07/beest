@@ -1308,6 +1308,7 @@ export class AdminService {
                 projectName,
                 startDate: AdminService.HACKATIME_EVENT_START,
                 endDate,
+                debugLog: (message) => this.logger.warn(message),
               }),
             ),
           );
