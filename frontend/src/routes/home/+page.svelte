@@ -2028,10 +2028,10 @@
               <p class="event-countdown-live">Live</p>
             {:else}
               <div class="event-countdown-grid">
-                <div class="event-countdown-unit"><strong>{eventCountdown.days}</strong><span>D</span></div>
-                <div class="event-countdown-unit"><strong>{eventCountdown.hours}</strong><span>H</span></div>
-                <div class="event-countdown-unit"><strong>{eventCountdown.minutes}</strong><span>M</span></div>
-                <div class="event-countdown-unit"><strong>{eventCountdown.seconds}</strong><span>S</span></div>
+                <div class="event-countdown-unit"><strong>{eventCountdown.days}</strong><span>days</span></div>
+                <div class="event-countdown-unit"><strong>{eventCountdown.hours}</strong><span>hours</span></div>
+                <div class="event-countdown-unit"><strong>{eventCountdown.minutes}</strong><span>minutes</span></div>
+                <div class="event-countdown-unit"><strong>{eventCountdown.seconds}</strong><span>seconds</span></div>
               </div>
             {/if}
           </div>
@@ -3337,7 +3337,8 @@
   }
 
   .tile-loaded .section-shop::after,
-  .tile-loaded .section-leaderboard::after {
+  .tile-loaded .section-leaderboard::after,
+  .tile-loaded .section-events::after {
     background-image: url('/images/tile2.webp');
   }
 
@@ -3379,6 +3380,14 @@
 
   .section-events {
     margin-bottom: 48px;
+  }
+
+  .section-events .section-copy {
+    font-family: "Sunny Mood", "Courier New", monospace;
+    font-size: clamp(16px, 1.6vw, 20px);
+    letter-spacing: 0.02em;
+    line-height: 1.5;
+    color: #e6f4fe;
   }
 
   .events-grid {
@@ -5959,14 +5968,14 @@
   .event-countdown-kicker {
     margin: 0;
     font-family: "Sunny Mood", "Courier New", monospace;
-    font-size: 16px;
+    font-size: 22px;
     color: #cbc1ae;
     white-space: nowrap;
   }
 
   .event-countdown-logo {
     font-family: "Stone Breaker", "Courier New", monospace;
-    font-size: 24px;
+    font-size: 32px;
     font-weight: 700;
     letter-spacing: 0.06em;
     line-height: 1;
@@ -6008,8 +6017,9 @@
 
   .event-countdown-unit span {
     font-family: "Sunny Mood", "Courier New", monospace;
-    font-size: 12px;
+    font-size: 11px;
     color: #e6f4fe;
+    white-space: nowrap;
   }
 
   .event-countdown-live {
@@ -6038,7 +6048,7 @@
     }
 
     .event-countdown-logo {
-      font-size: 22px;
+      font-size: 28px;
     }
 
     .event-countdown-grid {
