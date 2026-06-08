@@ -5954,10 +5954,11 @@
     display: flex;
     align-items: center;
     justify-content: space-between;
+    flex-wrap: wrap;
     gap: 12px;
     flex: 1 1 420px;
     max-width: 760px;
-    min-width: 260px;
+    min-width: 0;
     margin: 0;
     padding: 10px 12px;
     background: rgba(75, 72, 64, 0.58);
@@ -6130,6 +6131,7 @@
 
   .section-header {
     display: flex;
+    flex-wrap: wrap;
     justify-content: space-between;
     align-items: flex-start;
     gap: 24px;
