@@ -1326,8 +1326,21 @@ export class AdminService {
           });
 
           const round1 = (n: number) => Math.round(n * 10) / 10;
-          const totalRounded = round1(totalSeconds / 3600);
-          const aiRounded = round1(aiSeconds / 3600);
+          // Total = sum of the per-project, project-scoped durations so it matches
+          // the per-project breakdown reviewers see and approve against. Hackatime's
+          // top-level `total_seconds` scalar runs one combined session model across
+          // all linked projects, de-duplicating overlapping cross-project activity,
+          // so it can read LOWER than the summed per-project durations — which made
+          // the audit panel (which surfaces only this total) disagree with the review
+          // breakdown. Fall back to the scalar only if per-project durations are empty.
+          const summedProjectSeconds = [...perProjectDurations.values()].reduce(
+            (sum, secs) => sum + (Number.isFinite(secs) && secs > 0 ? secs : 0),
+            0,
+          );
+          const scopedTotalSeconds =
+            summedProjectSeconds > 0 ? summedProjectSeconds : totalSeconds;
+          const totalRounded = round1(scopedTotalSeconds / 3600);
+          const aiRounded = Math.min(totalRounded, round1(aiSeconds / 3600));
           const nonAiRounded = Math.max(0, round1(totalRounded - aiRounded));
 
           const heartbeatTimes = matched
