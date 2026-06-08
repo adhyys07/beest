@@ -11,6 +11,8 @@ import { AuditLogService } from '../audit-log/audit-log.service';
 import { HackatimeService } from '../hackatime/hackatime.service';
 import { RsvpService } from '../rsvp/rsvp.service';
 import { IdentityService } from '../identity/identity.service';
+import { SlackNotifyService } from '../slack/slack-notify.service';
+import { shipSubmittedDm } from '../slack/slack-notify.templates';
 import { CreateProjectDto } from './create-project.dto';
 import { UpdateProjectDto } from './update-project.dto';
 
@@ -43,6 +45,7 @@ export class ProjectsService {
     private hackatimeService: HackatimeService,
     private rsvpService: RsvpService,
     private identityService: IdentityService,
+    private slackNotify: SlackNotifyService,
     @InjectRepository(Project)
     private projectRepo: Repository<Project>,
     @InjectRepository(Comment)
@@ -529,6 +532,8 @@ export class ProjectsService {
       this.userRepo.findOne({ where: { id: userId }, select: ['email'] }).then((u) => {
         if (u?.email) this.rsvpService.updateDateField(u.email, 'Loops - beestShippedProject');
       });
+
+      this.notifyShipped(userId, project);
     } else if (dto.status === 'unshipped') {
       await this.auditLogService.log(
         userId,
@@ -547,6 +552,24 @@ export class ProjectsService {
 
     const { userId: _uid, user: _user, ...safe } = saved;
     return safe;
+  }
+
+  /** Fire-and-forget "submitted for review" DM to the builder (best-effort). */
+  private notifyShipped(
+    userId: string,
+    project: { name: string; codeUrl: string | null; demoUrl: string | null },
+  ): void {
+    this.userRepo
+      .findOne({ where: { id: userId }, select: ['slackId'] })
+      .then((u) => {
+        if (!u?.slackId) return;
+        const msg = shipSubmittedDm({
+          projectName: project.name,
+          projectLink: project.codeUrl ?? project.demoUrl ?? null,
+        });
+        return this.slackNotify.dm(u.slackId, msg.text, msg.blocks);
+      })
+      .catch(() => undefined);
   }
 
   async delete(projectId: string, userId: string, impersonatorName?: string) {
@@ -644,6 +667,8 @@ export class ProjectsService {
       `Resubmitted "${project.name}" for review`,
       impersonatorName,
     );
+
+    this.notifyShipped(userId, project);
 
     return { success: true, submissionId: submission.id };
   }

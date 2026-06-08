@@ -16,6 +16,11 @@ import { ShopSuggestion } from '../entities/shop-suggestion.entity';
 import { ShopSuggestionVote } from '../entities/shop-suggestion-vote.entity';
 import { AuditLogService } from '../audit-log/audit-log.service';
 import { RsvpService } from '../rsvp/rsvp.service';
+import { SlackNotifyService } from '../slack/slack-notify.service';
+import {
+  orderPendingDm,
+  orderFulfilledDm,
+} from '../slack/slack-notify.templates';
 
 @Injectable()
 export class ShopService {
@@ -37,7 +42,23 @@ export class ShopService {
     private readonly dataSource: DataSource,
     private readonly auditLogService: AuditLogService,
     private readonly rsvpService: RsvpService,
+    private readonly slackNotify: SlackNotifyService,
   ) {}
+
+  /** Fire-and-forget order-status DM to the buyer (best-effort). */
+  private notifyOrder(
+    userId: string,
+    message: { text: string; blocks: Record<string, unknown>[] },
+  ): void {
+    this.userRepo
+      .findOne({ where: { id: userId }, select: ['slackId'] })
+      .then((u) => {
+        if (u?.slackId) {
+          return this.slackNotify.dm(u.slackId, message.text, message.blocks);
+        }
+      })
+      .catch(() => undefined);
+  }
 
   // ── Shop suggestions ──
 
@@ -279,6 +300,16 @@ export class ShopService {
         if (u?.email) this.rsvpService.updateDateField(u.email, 'Loops - beestPurchasedItem');
       });
 
+      this.notifyOrder(
+        userId,
+        orderPendingDm({
+          orderId: result.orderId,
+          itemName: result.itemName,
+          quantity: result.quantity,
+          cost: `${result.pipesSpent} Pipes`,
+        }),
+      );
+
       return result;
     });
   }
@@ -431,6 +462,16 @@ export class ShopService {
       this.userRepo.findOne({ where: { id: order.userId }, select: ['email'] }).then((u) => {
         if (u?.email) this.rsvpService.updateDateField(u.email, 'Loops - beestFulfilledOrder');
       });
+
+      this.notifyOrder(
+        order.userId,
+        orderFulfilledDm({
+          orderId: order.id,
+          itemName: order.itemName,
+          quantity: order.quantity,
+          cost: `${order.pipesSpent} Pipes`,
+        }),
+      );
 
       return { success: true };
     });

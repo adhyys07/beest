@@ -5,6 +5,7 @@ import { AuditLogModule } from '../audit-log/audit-log.module';
 import { HackatimeModule } from '../hackatime/hackatime.module';
 import { RsvpModule } from '../rsvp/rsvp.module';
 import { IdentityModule } from '../identity/identity.module';
+import { SlackModule } from '../slack/slack.module';
 import { Project } from '../entities/project.entity';
 import { ProjectReview } from '../entities/project-review.entity';
 import { Comment } from '../entities/comment.entity';
@@ -15,7 +16,7 @@ import { LeaderboardController } from './leaderboard.controller';
 import { ProjectsService } from './projects.service';
 
 @Module({
-  imports: [AuthModule, AuditLogModule, HackatimeModule, RsvpModule, IdentityModule, TypeOrmModule.forFeature([Project, ProjectReview, Comment, Submission, User])],
+  imports: [AuthModule, AuditLogModule, HackatimeModule, RsvpModule, IdentityModule, SlackModule, TypeOrmModule.forFeature([Project, ProjectReview, Comment, Submission, User])],
   controllers: [ProjectsController, LeaderboardController],
   providers: [ProjectsService],
   exports: [ProjectsService],

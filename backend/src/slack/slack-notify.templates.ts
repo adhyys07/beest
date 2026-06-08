@@ -123,3 +123,144 @@ export function reviewChangesNeededDm(input: ReviewDmInput): DmMessage {
 
   return { text: `Changes needed on ${input.projectName}`, blocks };
 }
+
+export function shipSubmittedDm(input: {
+  projectName: string;
+  projectLink: string | null;
+}): DmMessage {
+  const nameMd = input.projectLink
+    ? `<${input.projectLink}|*${input.projectName}*>`
+    : `*${input.projectName}*`;
+  return {
+    text: `Your project ${input.projectName} was submitted for review`,
+    blocks: [
+      {
+        type: 'header',
+        text: {
+          type: 'plain_text',
+          text: ':rocket: Project submitted for review',
+          emoji: true,
+        },
+      },
+      {
+        type: 'section',
+        text: {
+          type: 'mrkdwn',
+          text: `Your project ${nameMd} has been submitted for review. We'll DM you here when a reviewer gets to it.`,
+        },
+      },
+    ],
+  };
+}
+
+interface OrderDmInput {
+  orderId: string;
+  itemName: string;
+  quantity: number | string;
+  /** Pre-formatted cost string, e.g. "5 Pipes". */
+  cost: string;
+}
+
+function orderFields(input: OrderDmInput): Record<string, unknown>[] {
+  return [
+    { type: 'mrkdwn', text: `*Order ID:* ${input.orderId}` },
+    { type: 'mrkdwn', text: `*Item:* ${input.itemName}` },
+    { type: 'mrkdwn', text: `*Quantity:* ${input.quantity}` },
+    { type: 'mrkdwn', text: `*Total:* ${input.cost}` },
+  ];
+}
+
+export function orderPendingDm(input: OrderDmInput): DmMessage {
+  return {
+    text: `Order #${input.orderId} placed`,
+    blocks: [
+      {
+        type: 'header',
+        text: {
+          type: 'plain_text',
+          text: ':shopping_trolley: Order placed',
+          emoji: true,
+        },
+      },
+      {
+        type: 'section',
+        text: { type: 'mrkdwn', text: '*Your order status:* Pending' },
+      },
+      {
+        type: 'section',
+        text: { type: 'mrkdwn', text: '*Order details:*' },
+        fields: orderFields(input),
+      },
+      { type: 'divider' },
+      {
+        type: 'context',
+        elements: [
+          {
+            type: 'mrkdwn',
+            text: "Thanks for being a Beester! We'll DM you here when it ships.",
+          },
+        ],
+      },
+    ],
+  };
+}
+
+export function orderFulfilledDm(input: OrderDmInput): DmMessage {
+  return {
+    text: `Order #${input.orderId} fulfilled`,
+    blocks: [
+      {
+        type: 'header',
+        text: {
+          type: 'plain_text',
+          text: ':tada: Order fulfilled!',
+          emoji: true,
+        },
+      },
+      {
+        type: 'section',
+        text: {
+          type: 'mrkdwn',
+          text: '*Your order status:* Fulfilled and on its way to you!',
+        },
+      },
+      {
+        type: 'section',
+        text: { type: 'mrkdwn', text: '*Order details:*' },
+        fields: orderFields(input),
+      },
+      { type: 'divider' },
+      {
+        type: 'context',
+        elements: [
+          { type: 'mrkdwn', text: 'Thank you for being a Beester!' },
+        ],
+      },
+    ],
+  };
+}
+
+export function fraudClearedDm(input: {
+  projectName: string;
+  projectLink: string | null;
+}): DmMessage {
+  const blocks: Record<string, unknown>[] = [
+    {
+      type: 'header',
+      text: {
+        type: 'plain_text',
+        text: ':white_check_mark: Your project cleared review',
+        emoji: true,
+      },
+    },
+    {
+      type: 'section',
+      text: {
+        type: 'mrkdwn',
+        text: `Your project *${input.projectName}* passed final review — your Pipes have been added to your balance. :yay:`,
+      },
+    },
+    ...viewProjectButton(input.projectLink),
+  ];
+  return { text: `${input.projectName} cleared review`, blocks };
+}

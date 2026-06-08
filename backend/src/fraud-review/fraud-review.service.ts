@@ -17,6 +17,11 @@ import { fetchWithTimeout } from '../fetch.util';
 import { AuditLogService } from '../audit-log/audit-log.service';
 import { ProjectAirtableSyncService } from '../projects/project-airtable-sync.service';
 import { RsvpService } from '../rsvp/rsvp.service';
+import { SlackNotifyService } from '../slack/slack-notify.service';
+import {
+  fraudClearedDm,
+  reviewChangesNeededDm,
+} from '../slack/slack-notify.templates';
 
 const POLL_INTERVAL_MS = 5 * 60 * 1000;
 const FRAUD_REJECT_THRESHOLD = 4;
@@ -67,6 +72,7 @@ export class FraudReviewService implements OnApplicationBootstrap, OnApplication
     private readonly auditLogService: AuditLogService,
     private readonly airtableSync: ProjectAirtableSyncService,
     private readonly rsvpService: RsvpService,
+    private readonly slackNotify: SlackNotifyService,
   ) {
     this.apiBaseUrl = (
       this.config.get('FRAUD_REVIEW_API_URL') ??
@@ -426,6 +432,21 @@ export class FraudReviewService implements OnApplicationBootstrap, OnApplication
       'project_reviewed',
       `Project "${project.name}" was flagged by fraud review`,
     );
+
+    // DM the builder the same generic, non-accusatory message we store on the
+    // review record — never reveal that this was a fraud flag (best-effort).
+    const rejectDm = reviewChangesNeededDm({
+      projectName: project.name,
+      projectLink: project.codeUrl ?? project.demoUrl ?? null,
+      reviewerName: null,
+      feedback: USER_FACING_FRAUD_FEEDBACK,
+    });
+    await this.slackNotify.dm(
+      project.user?.slackId,
+      rejectDm.text,
+      rejectDm.blocks,
+    );
+
     this.logger.log(
       `Fraud-rejected project ${project.id} (trust=${row.trustScore})`,
     );
@@ -518,6 +539,17 @@ export class FraudReviewService implements OnApplicationBootstrap, OnApplication
       project.userId,
       'project_reviewed',
       `Project "${project.name}" was approved (fraud-cleared)`,
+    );
+
+    // Confirm final approval + Pipes to the builder (best-effort).
+    const clearedDm = fraudClearedDm({
+      projectName: project.name,
+      projectLink: project.codeUrl ?? project.demoUrl ?? null,
+    });
+    await this.slackNotify.dm(
+      project.user?.slackId,
+      clearedDm.text,
+      clearedDm.blocks,
     );
 
     if (!row.outcomeRecorded && row.remoteProjectId) {
