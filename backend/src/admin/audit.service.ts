@@ -14,12 +14,9 @@ import { User } from '../entities/user.entity';
 import { AuditLogService } from '../audit-log/audit-log.service';
 import { RsvpService } from '../rsvp/rsvp.service';
 import { ProjectAirtableSyncService } from '../projects/project-airtable-sync.service';
-import { fetchWithTimeout } from '../fetch.util';
+import { IframeContextService } from './iframe-context.service';
 import { AdminService } from './admin.service';
 import { Inject, forwardRef } from '@nestjs/common';
-
-// Beest event start — Hackatime time before this date is ignored, matching the
-// rest of the admin Hackatime tooling.
 
 export type AuditAction = 'approve' | 'rereview' | 'reject' | 'ban';
 
@@ -68,6 +65,7 @@ export class AuditService {
 
   constructor(
     private readonly config: ConfigService,
+    private readonly iframeContexts: IframeContextService,
     @InjectRepository(Project) private readonly projectRepo: Repository<Project>,
     @InjectRepository(Submission)
     private readonly submissionRepo: Repository<Submission>,
@@ -79,10 +77,39 @@ export class AuditService {
     private readonly airtableSync: ProjectAirtableSyncService,
     @Inject(forwardRef(() => AdminService))
     private readonly adminService: AdminService,
-  ) {
-      'HACKATIME_BASE_URL',
-      'https://hackatime.hackclub.com',
-    );
+  ) {}
+
+  // ── Iframe context ─────────────────────────────────────────────────────────
+
+  /**
+   * Mint an opaque, single-use context id for the private audit iframe service.
+   * The heartbeat display + anomaly heuristics now live in that separate
+   * (private) service; beest hands it only the minimal identifiers it needs to
+   * fetch + analyze, behind the shared key. The browser only ever sees the
+   * opaque ctx.
+   */
+  async mintIframeContext(projectId: string): Promise<{ ctx: string }> {
+    const project = await this.projectRepo.findOne({
+      where: { id: projectId },
+      relations: ['user'],
+    });
+    if (!project) throw new NotFoundException('Project not found');
+
+    // Token fallback is off by default — only include the builder's Hackatime
+    // OAuth token in the payload when the operator has explicitly opted in.
+    const includeToken =
+      this.config.get<string>('AUDIT_SVC_INCLUDE_TOKEN') === 'true';
+
+    const ctx = this.iframeContexts.mint({
+      projectId: project.id,
+      projectName: project.name ?? null,
+      hackatimeUserId: project.user?.hackatimeUserId ?? null,
+      projectNames: parseHackatimeNames(project.hackatimeProjectName),
+      ...(includeToken
+        ? { hackatimeToken: project.user?.hackatimeToken ?? null }
+        : {}),
+    });
+    return { ctx };
   }
 
   // ── Queue ──────────────────────────────────────────────────────────────────
@@ -594,4 +621,5 @@ export class AuditService {
     this.logger.log(`Second-pass rejected project ${project.id}`);
     return { success: true };
   }
+
 }

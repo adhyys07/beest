@@ -3,8 +3,20 @@
 	import '@fontsource/opendyslexic/400.css';
 	import TimelapsePanel from '$lib/components/admin/TimelapsePanel.svelte';
 
-	let { data } = $props<{ data: { role?: string } }>();
+	let { data } = $props<{ data: { role?: string; auditSvcUrl: string } }>();
 	const isSuperAdmin = $derived(data?.role === 'Super Admin');
+
+	// Private audit service — the heartbeat timeline + anomaly heuristics live in
+	// a separate (private) repo, embedded here as an iframe. We only ever hand it
+	// an opaque, single-use context id; everything sensitive stays server-side.
+	const auditSvcUrl = $derived(data.auditSvcUrl);
+	const auditSvcOrigin = $derived.by(() => {
+		try {
+			return new URL(auditSvcUrl).origin;
+		} catch {
+			return '';
+		}
+	});
 
 	type Approval = {
 		reviewerName: string | null;
@@ -74,7 +86,6 @@
 		emailMismatch: boolean;
 		totalHours: number | null;
 	};
-;
 
 	let queue = $state<QueueItem[]>([]);
 	let idx = $state(0);
@@ -95,6 +106,11 @@
 	let submitting = $state(false);
 	let submitError = $state<string | null>(null);
 	let trust = $state<TrustInfo | null>(null);
+
+	// Audit iframe (heartbeat timeline + anomaly signals).
+	let iframeSrc = $state<string | null>(null);
+	let iframeHeight = $state(560);
+	let iframeError = $state<string | null>(null);
 	let trustLoading = $state(false);
 	let loadUnreviewedBusy = $state(false);
 	let loadUnreviewedError = $state<string | null>(null);
@@ -183,10 +199,52 @@
 		internalHoursInput = null;
 		internalHoursTouched = false;
 		submitError = null;
-		anomalies = null;
 		filterInfo = null;
 		trust = null;
-		if (c) loadTrust(c.id);
+		iframeSrc = null;
+		iframeError = null;
+		iframeHeight = 560;
+		if (c) {
+			loadTrust(c.id);
+			mintIframe(c.id);
+		}
+	});
+
+	// Mint a fresh single-use context for the audit iframe and point it there.
+	// Re-minted every time the visible project changes (the panel navigates the
+	// queue client-side), so each embed gets its own short-lived ctx.
+	async function mintIframe(projectId: string) {
+		iframeError = null;
+		try {
+			const res = await fetch(`/api/admin/audit/${projectId}/iframe-context`, { method: 'POST' });
+			const j = await res.json().catch(() => ({}));
+			if (!res.ok || !j.ctx) throw new Error(j.message || j.error || `HTTP ${res.status}`);
+			iframeSrc = `${auditSvcUrl}/panel?ctx=${encodeURIComponent(j.ctx)}`;
+		} catch (e) {
+			iframeError = e instanceof Error ? e.message : String(e);
+		}
+	}
+
+	// Receive filter / resize messages from the audit iframe. Origin-checked so
+	// only the configured audit service can drive the approved-hours math.
+	onMount(() => {
+		function onMessage(e: MessageEvent) {
+			if (!auditSvcOrigin || e.origin !== auditSvcOrigin) return;
+			const d = e.data;
+			if (!d || d.source !== 'beest-audit') return;
+			if (d.type === 'filter') {
+				filterInfo = {
+					totalActiveMinutes: d.totalActiveMinutes,
+					filteredActiveMinutes: d.filteredActiveMinutes,
+					aiPercent: d.aiPercent
+				};
+			} else if (d.type === 'resize' && typeof d.height === 'number') {
+				// Clamp to a sane range so a hostile/buggy height can't blow up layout.
+				iframeHeight = Math.max(200, Math.min(4000, Math.ceil(d.height)));
+			}
+		}
+		window.addEventListener('message', onMessage);
+		return () => window.removeEventListener('message', onMessage);
 	});
 
 	async function loadTrust(projectId: string) {
@@ -454,9 +512,22 @@
 					</section>
 
 					<section class="sec">
-						<h3>Hackatime heartbeats</h3>
+						<h3>Hackatime heartbeats &amp; anomaly signals</h3>
+						{#if iframeError}
+							<div class="err sub-err">audit panel failed to load: {iframeError}</div>
+						{:else if iframeSrc}
+							<iframe
+								title="Heartbeat activity &amp; anomaly analysis"
+								src={iframeSrc}
+								style:height={`${iframeHeight}px`}
+								class="audit-frame"
+								sandbox="allow-scripts allow-same-origin"
+								referrerpolicy="no-referrer"
+							></iframe>
+						{:else}
+							<div class="muted">loading audit panel…</div>
+						{/if}
 					</section>
-
 
 					<section class="sec sec-decision">
 						<div class="seg">
@@ -826,6 +897,13 @@
 	.prior-feedback { font-size: 0.82rem; margin: 0.4rem 0 0; color: var(--text); }
 	.prior-internal { font-size: 0.78rem; }
 
+	.audit-frame {
+		width: 100%;
+		border: none;
+		display: block;
+		background: transparent;
+		color-scheme: normal;
+	}
 	.anom-row {
 		display: flex;
 		align-items: center;

@@ -6,6 +6,10 @@ import adapter from '@sveltejs/adapter-node';
 // that's where the script-src lockdown matters.
 const dev = process.env.NODE_ENV !== 'production';
 
+// Origin of the private audit service embedded in the second-pass review panel.
+// Must be named in frame-src or the production CSP would block the iframe.
+const auditSvcOrigin = process.env.AUDIT_SVC_ORIGIN ?? 'https://audit.beest.hackclub.com';
+
 /** @type {import('@sveltejs/kit').Config} */
 const config = {
 	kit: {
@@ -26,7 +30,10 @@ const config = {
 							// money-theft path. All of the app's assets are same-origin.
 							'script-src': ['self'],
 							'object-src': ['none'],
-							'base-uri': ['self']
+							'base-uri': ['self'],
+							// The audit heartbeat/anomaly panel is embedded from its own
+							// (private) origin; everything else stays same-origin.
+							'frame-src': ['self', auditSvcOrigin]
 						}
 					}
 				})

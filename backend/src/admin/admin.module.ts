@@ -20,11 +20,14 @@ import { FraudReviewModule } from '../fraud-review/fraud-review.module';
 import { ProjectAirtableSyncModule } from '../projects/project-airtable-sync.module';
 import { SlackModule } from '../slack/slack.module';
 import { AdminController } from './admin.controller';
+import { AuditInternalController } from './audit-internal.controller';
 import { AdminService } from './admin.service';
 import { AuditService } from './audit.service';
+import { IframeContextService } from './iframe-context.service';
 import { SuperAdminGuard } from './super-admin.guard';
 import { ReviewerGuard } from './reviewer.guard';
 import { FraudReviewerGuard } from './fraud-reviewer.guard';
+import { AuditServiceKeyGuard } from './audit-service-key.guard';
 
 @Module({
   imports: [
@@ -39,7 +42,15 @@ import { FraudReviewerGuard } from './fraud-reviewer.guard';
     ProjectAirtableSyncModule,
     SlackModule,
   ],
-  controllers: [AdminController],
-  providers: [AdminService, AuditService, SuperAdminGuard, ReviewerGuard, FraudReviewerGuard],
+  controllers: [AdminController, AuditInternalController],
+  providers: [
+    AdminService,
+    AuditService,
+    IframeContextService,
+    SuperAdminGuard,
+    ReviewerGuard,
+    FraudReviewerGuard,
+    AuditServiceKeyGuard,
+  ],
 })
 export class AdminModule {}

@@ -17,5 +17,9 @@ export const load: PageServerLoad = async ({ cookies }) => {
 	if (!adminRes.ok) redirect(302, '/home');
 	const data = await adminRes.json();
 
-	return { user, role: data.perms };
+	// Base URL of the private audit service whose /panel page is iframed in for
+	// the heartbeat timeline + anomaly heuristics. No trailing slash.
+	const auditSvcUrl = (env.AUDIT_SVC_URL ?? 'http://localhost:5174').replace(/\/+$/, '');
+
+	return { user, role: data.perms, auditSvcUrl };
 };

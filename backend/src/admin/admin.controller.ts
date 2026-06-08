@@ -7,12 +7,11 @@ import {
   Param,
   Body,
   Req,
-  Res,
   UseGuards,
   BadRequestException,
   ParseUUIDPipe,
 } from '@nestjs/common';
-import type { Request, Response } from 'express';
+import type { Request } from 'express';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import { SuperAdminGuard } from './super-admin.guard';
 import { ReviewerGuard } from './reviewer.guard';
@@ -338,6 +337,15 @@ export class AdminController {
   async auditLoadUnreviewed(@Req() req: Request) {
     const superAdminId = (req as any).user?.uid;
     return this.auditService.loadUnreviewedIntoQueue(superAdminId);
+  }
+
+  // Mint an opaque, single-use context for the private audit iframe service.
+  // The heartbeat display + anomaly heuristics live in that separate service;
+  // the panel embeds it as `${AUDIT_SVC_URL}/panel?ctx=<ctx>`.
+  @UseGuards(FraudReviewerGuard)
+  @Post('audit/:id/iframe-context')
+  async auditIframeContext(@Param('id', ParseUUIDPipe) id: string) {
+    return this.auditService.mintIframeContext(id);
   }
 
   @UseGuards(FraudReviewerGuard)
