@@ -108,6 +108,7 @@
 	let trust = $state<TrustInfo | null>(null);
 
 	// Audit iframe (heartbeat timeline + anomaly signals).
+	let iframeEl = $state<HTMLIFrameElement | null>(null);
 	let iframeSrc = $state<string | null>(null);
 	let iframeHeight = $state(560);
 	let iframeError = $state<string | null>(null);
@@ -219,11 +220,35 @@
 			const res = await fetch(`/api/admin/audit/${projectId}/iframe-context`, { method: 'POST' });
 			const j = await res.json().catch(() => ({}));
 			if (!res.ok || !j.ctx) throw new Error(j.message || j.error || `HTTP ${res.status}`);
-			iframeSrc = `${auditSvcUrl}/panel?ctx=${encodeURIComponent(j.ctx)}`;
+			// Seed the embed's first paint with the current theme so it doesn't flash
+			// the wrong palette; live toggles after load go via postMessage below.
+			const q = new URLSearchParams({
+				ctx: j.ctx,
+				light: lightMode ? '1' : '0',
+				dys: dyslexicFont ? '1' : '0'
+			});
+			iframeSrc = `${auditSvcUrl}/panel?${q.toString()}`;
 		} catch (e) {
 			iframeError = e instanceof Error ? e.message : String(e);
 		}
 	}
+
+	// Push Light/Dark + dyslexic-font changes into the embed without reloading it
+	// (a reload would re-fetch heartbeats). Pinned to the audit origin.
+	function postThemeToIframe() {
+		const win = iframeEl?.contentWindow;
+		if (!win || !auditSvcOrigin) return;
+		win.postMessage(
+			{ source: 'beest', type: 'theme', light: lightMode, dyslexic: dyslexicFont },
+			auditSvcOrigin
+		);
+	}
+	$effect(() => {
+		// Re-run whenever the toggles change.
+		lightMode;
+		dyslexicFont;
+		postThemeToIframe();
+	});
 
 	// Receive filter / resize messages from the audit iframe. Origin-checked so
 	// only the configured audit service can drive the approved-hours math.
@@ -517,12 +542,14 @@
 							<div class="err sub-err">audit panel failed to load: {iframeError}</div>
 						{:else if iframeSrc}
 							<iframe
+								bind:this={iframeEl}
 								title="Heartbeat activity &amp; anomaly analysis"
 								src={iframeSrc}
 								style:height={`${iframeHeight}px`}
 								class="audit-frame"
 								sandbox="allow-scripts allow-same-origin"
 								referrerpolicy="no-referrer"
+								onload={postThemeToIframe}
 							></iframe>
 						{:else}
 							<div class="muted">loading audit panel…</div>
