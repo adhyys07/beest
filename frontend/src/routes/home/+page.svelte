@@ -35,6 +35,7 @@
 
   let { data } = $props();
   const initialEvents = data.events ?? [];
+  const MAX_SCREENSHOT_BYTES = 5 * 1024 * 1024;
 
   function slackUserUrl(slackId: string) {
     return `https://hackclub.enterprise.slack.com/team/${encodeURIComponent(slackId)}`;
@@ -460,6 +461,11 @@
     const input = e.target as HTMLInputElement;
     const file = input.files?.[0];
     if (!file) return;
+    if (file.size > MAX_SCREENSHOT_BYTES) {
+      formError = 'Screenshot must be 5 MB or smaller';
+      input.value = '';
+      return;
+    }
     if (!['image/png', 'image/jpeg', 'image/gif', 'image/webp'].includes(file.type)) {
       formError = 'Screenshot must be a PNG, JPEG, GIF, or WebP image';
       input.value = '';
