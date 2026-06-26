@@ -74,7 +74,7 @@
   let editingProject = $state<any>(null);
   type ProjectReview = {
     id: string;
-    status: 'approved' | 'changes_needed' | 'rejected';
+    status: 'approved' | 'changes_needed';
     feedback: string | null;
     reviewerName: string | null;
     hideReviewerName?: boolean;
@@ -87,79 +87,6 @@
   let projectName = $state('');
   let projectDesc = $state('');
   let projectType = $state('');
-
-  // Common "followed-a-tutorial" beginner projects. When a new project's name or
-  // description matches one of these, we show a soft nudge (not a hard block)
-  // asking the builder to add a unique twist. Phrases are matched loosely
-  // (case-insensitive, punctuation-insensitive, substring) so "Tic-Tac-Toe" and
-  // "tic tac toe game" both hit. Easy to extend — just add a lowercase phrase.
-  const TUTORIAL_BLACKLIST = [
-    'rock paper scissors',
-    'weather app',
-    'to do list',
-    'todo list',
-    'todo app',
-    'tic tac toe',
-    'calculator',
-    'number guessing game',
-    'guess the number',
-    'hangman',
-    'pomodoro',
-    'snake game',
-    'snake',
-    'snake clone',
-    'classic snake',
-    'snakes and ladders',
-    'quiz app',
-    'tip calculator',
-    'bmi calculator',
-    'temperature converter',
-    'unit converter',
-    'currency converter',
-    'currency conversion',
-    'currency exchange',
-    'money converter',
-    'exchange rate app',
-    'exchange rate converter',
-    'age calculator',
-    'digital clock',
-    'countdown timer',
-    'stopwatch',
-    'random quote generator',
-    'quote generator',
-    'dice roller',
-    'coin flip',
-    'magic 8 ball',
-    'color picker',
-    'random color generator',
-    'notes app',
-    'simple chatbot',
-  ];
-
-  // Lowercase and strip every non-alphanumeric char (dashes, spaces, punctuation)
-  // so matching is on likeness rather than an exact string — "Tic-Tac-Toe",
-  // "tic tac toe", and "tictactoe" all collapse to the same thing.
-  function normalizeForBlacklist(s: string): string {
-    return s.toLowerCase().replace(/[^a-z0-9]+/g, '');
-  }
-
-  function matchedTutorialPhrase(name: string, desc: string): string | null {
-    const haystack = normalizeForBlacklist(`${name} ${desc}`);
-    for (const phrase of TUTORIAL_BLACKLIST) {
-      if (haystack.includes(normalizeForBlacklist(phrase))) return phrase;
-    }
-    return null;
-  }
-
-  let showTutorialWarning = $state(false);
-  let tutorialWarningAcknowledged = $state(false);
-
-  function acknowledgeTutorialWarning() {
-    tutorialWarningAcknowledged = true;
-    showTutorialWarning = false;
-    submitProject();
-  }
-
   let codeUrl = $state('');
   let demoUrl = $state('');
   let readmeUrl = $state('');
@@ -281,8 +208,27 @@
   const DEVLOG_DRAFT_KEY = 'beest:devlog-lookout-draft';
 
   function selectDefaultDevlogLookoutSession(sessions: LookoutSessionOption[]) {
-    const completeSession = sessions.find((session) => session.status === 'complete');
-    return completeSession?.id ?? sessions[0]?.id ?? null;
+    const selectable = getSelectableDevlogLookoutSessions(sessions);
+    const completeSession = selectable.find((session) => session.status === 'complete');
+    return completeSession?.id ?? selectable[0]?.id ?? null;
+  }
+
+  function sortDevlogLookoutSessions(sessions: LookoutSessionOption[]) {
+    return [...sessions].sort((a, b) => {
+      const statusRank = (session: LookoutSessionOption) => {
+        if (session.status === 'complete') return 0;
+        return 1;
+      };
+      const rankDelta = statusRank(a) - statusRank(b);
+      if (rankDelta !== 0) return rankDelta;
+      const aTime = a.createdAt ? Date.parse(a.createdAt) : 0;
+      const bTime = b.createdAt ? Date.parse(b.createdAt) : 0;
+      return bTime - aTime;
+    });
+  }
+
+  function getSelectableDevlogLookoutSessions(sessions: LookoutSessionOption[]) {
+    return sortDevlogLookoutSessions(sessions).filter((session) => session.status !== 'failed');
   }
 
   async function fetchDevlogLookoutSessions(projectId: string) {
@@ -306,7 +252,7 @@
       const sessions = Array.isArray(data?.sessions) ? data.sessions : [];
       devlogLookoutSessions = sessions;
 
-      if (!sessions.some((session: LookoutSessionOption) => session.id === devlogLookoutSessionId)) {
+      if (!sessions.some((session: LookoutSessionOption) => session.id === devlogLookoutSessionId && session.status !== 'failed')) {
         devlogLookoutSessionId = selectDefaultDevlogLookoutSession(sessions);
       }
     } catch {
@@ -489,7 +435,7 @@
   let resubmitLoading = $state(false);
 
   // Shipping eligibility
-  let shippingCheck = $state<{ hasAddress: boolean; hasBirthdate: boolean; identityVerified: boolean; identityEligible: boolean; identityStatus: 'eligible' | 'ineligible' | 'unverified'; eligible: boolean; addressPortalUrl: string; identityPortalUrl: string } | null>(null);
+  let shippingCheck = $state<{ hasAddress: boolean; hasBirthdate: boolean; identityVerified: boolean; eligible: boolean; addressPortalUrl: string; identityPortalUrl: string } | null>(null);
   let shippingCheckLoading = $state(false);
   let showShippingPrompt = $state(false);
   let identityPollAttempts = $state(0);
@@ -522,8 +468,6 @@
     aiUseDescription = '';
     keystrokes = 0;
     formError = '';
-    showTutorialWarning = false;
-    tutorialWarningAcknowledged = false;
     checkOpenSource = false;
     checkDemoable = false;
     checkReadme = false;
@@ -873,15 +817,6 @@
 
   async function submitProject() {
     if (!canSubmit) return;
-
-    // Soft nudge when a project (new OR renamed) looks like a basic tutorial
-    // clone. Firing on edit too closes the obvious bypass of creating with a
-    // clean name then renaming to a blacklisted one. Shown once per open form.
-    if (!tutorialWarningAcknowledged && matchedTutorialPhrase(projectName, projectDesc)) {
-      showTutorialWarning = true;
-      return;
-    }
-
     formError = '';
     submitting = true;
 
@@ -1669,7 +1604,7 @@
           {/each}
           {#if data.role === 'Super Admin'}
             <li><a href="/admin" class="nav-btn nav-link">Admin</a></li>
-          {:else if data.role === 'Reviewer' || data.role === 'Fraud Reviewer' || data.role === 'Fulfiller'}
+          {:else if data.role === 'Reviewer' || data.role === 'Fraud Reviewer'}
             <li><a href="/admin" class="nav-btn nav-link">Review</a></li>
           {/if}
         </ul>
@@ -1724,7 +1659,7 @@
             {#each editingProjectReviews as review}
               <div class="review-feedback-card review-feedback-{review.status}">
                 <div class="review-feedback-header">
-                  <span class="review-feedback-badge {review.status}">{review.status === 'changes_needed' ? 'Changes Needed' : review.status === 'rejected' ? 'Rejected' : 'Approved'}</span>
+                  <span class="review-feedback-badge {review.status}">{review.status === 'changes_needed' ? 'Changes Needed' : 'Approved'}</span>
                   {#if review.hideReviewerName}
                     <span class="review-feedback-reviewer">by a reviewer</span>
                   {:else if review.reviewerName}
@@ -1816,7 +1751,7 @@
           {#each editingProjectReviews as review}
             <div class="review-feedback-card review-feedback-{review.status}">
               <div class="review-feedback-header">
-                <span class="review-feedback-badge {review.status}">{review.status === 'changes_needed' ? 'Changes Needed' : review.status === 'rejected' ? 'Rejected' : 'Approved'}</span>
+                <span class="review-feedback-badge {review.status}">{review.status === 'changes_needed' ? 'Changes Needed' : 'Approved'}</span>
                 {#if review.hideReviewerName}
                   <span class="review-feedback-reviewer">by a reviewer</span>
                 {:else if review.reviewerName}
@@ -2031,21 +1966,15 @@
           <div class="in-review-notice">
             <p class="in-review-text">This project has been reviewed and is awaiting fraud checks. You'll be notified once the fraud team finishes their review.</p>
           </div>
-        {:else if editingProject?.status === 'rejected'}
-          <div class="in-review-notice in-review-notice--rejected">
-            <p class="in-review-text">This project was rejected and can't be resubmitted. You're welcome to build and ship a different project.</p>
-          </div>
         {/if}
         <div class="form-actions">
-          {#if editingProject && editingProject.status !== 'approved' && editingProject.status !== 'rejected'}
+          {#if editingProject && editingProject.status !== 'approved'}
             <button class="form-btn-delete" onclick={() => deleteProject(editingProject.id)}>Delete</button>
           {/if}
-          {#if editingProject?.status !== 'rejected'}
-            <button class="form-btn-submit" disabled={!canSubmit || editingProject?.status === 'unreviewed'} onclick={submitProject}>
-              {#if submitting}{editingProject ? 'Saving...' : 'Creating...'}{:else}{editingProject ? 'Save Changes' : 'Create Project'}{/if}
-            </button>
-          {/if}
-          {#if editingProject && editingProject.status !== 'unreviewed' && editingProject.status !== 'rejected'}
+          <button class="form-btn-submit" disabled={!canSubmit || editingProject?.status === 'unreviewed'} onclick={submitProject}>
+            {#if submitting}{editingProject ? 'Saving...' : 'Creating...'}{:else}{editingProject ? 'Save Changes' : 'Create Project'}{/if}
+          </button>
+          {#if editingProject && editingProject.status !== 'unreviewed'}
               <div class="submit-review-wrap">
                 <button
                   class="form-btn-review"
@@ -2126,20 +2055,15 @@
         <h2 class="section-title">Complete Your Profile</h2>
         <p class="shipping-prompt-text">Before submitting for review, we need a few things from your Hack Club Auth profile — we use these to verify you and to ship prizes when your project is approved:</p>
         <div class="shipping-prompt-items">
-          {#if shippingCheck.identityStatus === 'unverified'}
+          {#if !shippingCheck.identityVerified}
             <div class="shipping-prompt-item missing">
               <span class="shipping-icon">&#x2717;</span>
               <span>Identity not verified</span>
             </div>
-          {:else if shippingCheck.identityStatus === 'ineligible'}
-            <div class="shipping-prompt-item missing">
-              <span class="shipping-icon">&#x2717;</span>
-              <span>Identity verified, but not eligible for YSWS rewards</span>
-            </div>
           {:else}
             <div class="shipping-prompt-item done">
               <span class="shipping-icon">&#x2713;</span>
-              <span>Identity verified &amp; eligible</span>
+              <span>Identity verified</span>
             </div>
           {/if}
           {#if !shippingCheck.hasAddress}
@@ -2165,7 +2089,7 @@
             </div>
           {/if}
         </div>
-        {#if shippingCheck.identityStatus === 'unverified'}
+        {#if !shippingCheck.identityVerified}
           <a class="action-btn shipping-portal-btn" href={shippingCheck.identityPortalUrl} target="_blank" rel="noopener noreferrer">
             Verify your identity
           </a>
@@ -2177,8 +2101,6 @@
             </button>
             <p class="shipping-prompt-poll">We stopped checking automatically. Tap above once HQ approves your document.</p>
           {/if}
-        {:else if shippingCheck.identityStatus === 'ineligible'}
-          <p class="shipping-prompt-poll">Your Hack Club identity is verified, but it's marked not eligible for YSWS rewards — usually an age or region restriction. You can keep building, but this project can't be shipped for review. If you think this is a mistake, reach out to Hack Club.</p>
         {:else if shippingCheck.eligible}
           <p class="shipping-prompt-poll shipping-prompt-success">Identity verified! Click Submit again to ship.</p>
         {/if}
@@ -2216,7 +2138,7 @@
           </label>
           <label class="review-check">
             <input type="checkbox" bind:checked={checkStartedOrUpdated} />
-            <span>I started this project later than April 2nd, 2026, or shipped a significant update to an old project</span>
+            <span>I started this project later than August 2nd, 2026, or shipped a significant update to an old project</span>
           </label>
         </div>
 
@@ -2329,7 +2251,7 @@
                   <div class="project-header-row">
                     <h3 class="project-name">{project.name}</h3>
                     <span class="project-type-badge">{project.projectType}</span>
-                    <span class="project-status-badge {project.status === 'fraud_pending' ? 'unreviewed' : project.status}">{project.status === 'changes_needed' ? 'Changes Needed' : project.status === 'fraud_pending' ? 'In Review' : project.status === 'rejected' ? 'Rejected' : project.status}</span>
+                    <span class="project-status-badge {project.status === 'fraud_pending' ? 'unreviewed' : project.status}">{project.status === 'changes_needed' ? 'Changes Needed' : project.status === 'fraud_pending' ? 'In Review' : project.status}</span>
                   </div>
                   <p class="project-desc">{project.description}</p>
                   <div class="project-links">
@@ -2722,16 +2644,6 @@
     </div>
     {/if}
 
-    {#if showTutorialWarning}
-    <div use:portal class="tutorial-warning-overlay" role="dialog" aria-modal="true" aria-label="Tutorial project notice">
-      <div class="tutorial-warning-modal">
-        <h2 class="tutorial-warning-title">One quick thing</h2>
-        <p class="tutorial-warning-text">Beest is a space for creatives, tutorials are valuable but if you are creating a basic tutoral please add a unique feature, twist or detail, otherwise it may not be accepted.</p>
-        <button class="tutorial-warning-ok" onclick={acknowledgeTutorialWarning}>OK</button>
-      </div>
-    </div>
-    {/if}
-
     {#if activeSection === 'explore'}
     <section class="section section-explore">
       <div class="section-inner">
@@ -2964,21 +2876,47 @@
                 {#if devlogLookoutSessionsLoading}
                   <span class="lookout-hint">Checking for saved Lookout sessions…</span>
                 {:else if devlogLookoutSessions.length > 0}
-                  <label class="lookout-select-wrap" for="devlog-lookout-session">
-                    <span class="lookout-select-label">Attach an existing session</span>
-                    <select
-                      id="devlog-lookout-session"
-                      class="form-input form-select lookout-select"
-                      bind:value={devlogLookoutSessionId}
+                  <div class="lookout-picker" role="radiogroup" aria-label="Saved Lookout sessions">
+                    <button
+                      type="button"
+                      class="lookout-session-card lookout-session-card-none"
+                      class:active={devlogLookoutSessionId === null}
+                      role="radio"
+                      aria-checked={devlogLookoutSessionId === null}
+                      onclick={() => devlogLookoutSessionId = null}
                     >
-                      <option value="">None</option>
-                      {#each [...devlogLookoutSessions].sort((a, b) => Number(b.status === 'complete') - Number(a.status === 'complete')) as session (session.id)}
-                        <option value={session.id}>
-                          {session.status === 'complete' ? 'Complete' : session.status} · {session.createdAt ? formatLocal(session.createdAt) : 'recent'}
-                        </option>
-                      {/each}
-                    </select>
-                  </label>
+                      <span class="lookout-session-title">No timelapse</span>
+                      <span class="lookout-session-meta">Post without a Lookout session</span>
+                    </button>
+                    {#each getSelectableDevlogLookoutSessions(devlogLookoutSessions) as session (session.id)}
+                      <button
+                        type="button"
+                        class="lookout-session-card"
+                        class:active={devlogLookoutSessionId === session.id}
+                        role="radio"
+                        aria-checked={devlogLookoutSessionId === session.id}
+                        onclick={() => devlogLookoutSessionId = session.id}
+                      >
+                        {#if session.thumbnailUrl}
+                          <img class="lookout-session-thumb" src={session.thumbnailUrl} alt="Lookout session thumbnail" />
+                        {:else}
+                          <div class="lookout-session-thumb lookout-session-thumb-placeholder" aria-hidden="true">{session.status === 'complete' ? '✓' : '…'}</div>
+                        {/if}
+                        <div class="lookout-session-copy">
+                          <span class="lookout-session-title">{session.status === 'complete' ? 'Complete session' : session.status}</span>
+                          <span class="lookout-session-meta">
+                            {#if session.trackedSeconds}
+                              {fmtTrackedShort(session.trackedSeconds)} ·
+                            {/if}
+                            {session.createdAt ? formatLocal(session.createdAt) : 'recent'}
+                          </span>
+                          {#if session.status === 'complete'}
+                            <span class="lookout-session-meta lookout-session-meta-accent">Ready to attach</span>
+                          {/if}
+                        </div>
+                      </button>
+                    {/each}
+                  </div>
                 {/if}
                 {#if devlogLookoutSessionId}
                   <span class="lookout-attached">Recording attached — finish in the Lookout app; it'll appear on this devlog once it's done.</span>
@@ -4399,11 +4337,6 @@
     margin-bottom: 8px;
   }
 
-  .in-review-notice--rejected {
-    background: rgba(179, 74, 74, 0.15);
-    border-color: #b34a4a;
-  }
-
   .in-review-text {
     margin: 0;
     font-family: "Courier New", monospace;
@@ -4741,6 +4674,70 @@
     display: flex;
     flex-direction: column;
     gap: 0.5rem;
+  }
+  .lookout-picker {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+    gap: 0.65rem;
+  }
+  .lookout-session-card {
+    display: grid;
+    grid-template-columns: 52px minmax(0, 1fr);
+    gap: 0.75rem;
+    align-items: center;
+    padding: 0.7rem 0.8rem;
+    border-radius: 12px;
+    border: 1px solid rgba(255, 255, 255, 0.14);
+    background: rgba(255, 255, 255, 0.05);
+    color: inherit;
+    text-align: left;
+    cursor: pointer;
+    transition: border-color 120ms ease, transform 120ms ease, background 120ms ease;
+  }
+  .lookout-session-card:hover {
+    transform: translateY(-1px);
+    border-color: rgba(255, 255, 255, 0.28);
+    background: rgba(255, 255, 255, 0.08);
+  }
+  .lookout-session-card.active {
+    border-color: rgba(255, 255, 255, 0.5);
+    background: rgba(255, 255, 255, 0.12);
+    box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.08) inset;
+  }
+  .lookout-session-card-none {
+    grid-template-columns: 1fr;
+    min-height: 84px;
+  }
+  .lookout-session-thumb {
+    width: 52px;
+    height: 52px;
+    border-radius: 10px;
+    object-fit: cover;
+    background: rgba(0, 0, 0, 0.3);
+  }
+  .lookout-session-thumb-placeholder {
+    display: grid;
+    place-items: center;
+    color: rgba(255, 255, 255, 0.8);
+    font-size: 1.15rem;
+    font-weight: 700;
+  }
+  .lookout-session-copy {
+    display: flex;
+    flex-direction: column;
+    gap: 0.15rem;
+    min-width: 0;
+  }
+  .lookout-session-title {
+    font-size: 0.92rem;
+    font-weight: 700;
+  }
+  .lookout-session-meta {
+    font-size: 0.78rem;
+    opacity: 0.72;
+  }
+  .lookout-session-meta-accent {
+    opacity: 0.9;
   }
   .lookout-record-btn {
     align-self: flex-start;
@@ -6035,61 +6032,6 @@
     font-size: 0.85rem;
   }
 
-  /* ── tutorial warning modal ── */
-  .tutorial-warning-overlay {
-    position: fixed;
-    inset: 0;
-    background: rgba(0, 0, 0, 0.78);
-    z-index: 1200;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    backdrop-filter: blur(6px);
-    animation: fadeIn 200ms ease;
-    padding: 1rem;
-  }
-  .tutorial-warning-modal {
-    background: #4b4840;
-    color: #e8e0d4;
-    border: 1px solid #6c6659;
-    border-radius: 14px;
-    padding: 2rem 1.75rem;
-    width: 100%;
-    max-width: 440px;
-    text-align: center;
-    box-shadow: 0 20px 60px rgba(0, 0, 0, 0.5);
-    font-family: "Sunny Mood", "Courier New", monospace;
-  }
-  .tutorial-warning-title {
-    margin: 0 0 0.75rem;
-    font-size: 1.6rem;
-    font-family: "Sunny Mood", "Courier New", monospace;
-  }
-  .tutorial-warning-text {
-    margin: 0 0 1.5rem;
-    font-size: 1.1rem;
-    line-height: 1.5;
-    opacity: 0.9;
-    font-family: "Sunny Mood", "Courier New", monospace;
-  }
-  .tutorial-warning-ok {
-    padding: 0.65rem 2.5rem;
-    border-radius: 10px;
-    border: 1px solid #93b4cd;
-    background: #52504a;
-    color: #e8e0d4;
-    font-size: 1.1rem;
-    font-weight: 700;
-    cursor: pointer;
-    transition: transform 120ms ease, background 120ms ease, border-color 120ms ease;
-    font-family: "Sunny Mood", "Courier New", monospace;
-  }
-  .tutorial-warning-ok:hover {
-    background: #5d5a52;
-    border-color: #c5d8e6;
-    transform: translateY(-2px);
-  }
-
   /* ── shop modal ── */
   .shop-modal-overlay {
     position: fixed;
@@ -7028,10 +6970,6 @@
   .project-status-badge.approved {
     background: #93b4cd;
     color: #635a4e;
-  }
-
-  .project-status-badge.rejected {
-    background: #b34a4a;
   }
 
   .project-desc {
