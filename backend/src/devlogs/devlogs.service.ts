@@ -57,7 +57,8 @@ export class DevlogsService {
   async create(userId: string, dto: CreateDevlogDto) {
     const title = this.requireTitle(dto.title);
     const text = this.requireText(dto.text);
-    const projectId = await this.requireProjectId(dto.projectId, userId);
+    const project = await this.requireProjectId(dto.projectId, userId);
+    const projectId = project.id;
 
     const validated = this.validateImages(dto.images);
     const imageUrls = await this.uploadImages(validated);
@@ -83,7 +84,7 @@ export class DevlogsService {
     await this.auditLogService.log(
       userId,
       'devlog_created',
-      `Created devlog "${title}" (${text.length} chars) on project ${projectId}`,
+      `Created devlog "${title}" (${text.length} chars) on project ${project.name}`,
     );
 
     return this.toPublic(saved);
@@ -185,7 +186,7 @@ export class DevlogsService {
   private async requireProjectId(
     projectId: string | null | undefined,
     userId: string,
-  ): Promise<string> {
+  ): Promise<{ id: string; name: string }> {
     if (!projectId || typeof projectId !== 'string') {
       throw new BadRequestException('projectId is required');
     }
@@ -194,10 +195,10 @@ export class DevlogsService {
       throw new BadRequestException('projectId is required');
     }
 
-    // UUID format check
+  // UUID format check
     if (
       !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(
-        trimmed,
+      trimmed,
       )
     ) {
       throw new BadRequestException('projectId is not a valid id');
@@ -205,13 +206,14 @@ export class DevlogsService {
 
     const project = await this.projectRepo.findOne({
       where: { id: trimmed, userId },
-      select: ['id'],
+      select: ['id', 'name'],
     });
     if (!project) {
       throw new BadRequestException('projectId not found or not yours');
     }
-    return project.id;
+    return { id: project.id, name: project.name };
   }
+
 
   private validateImages(
     images: string[] | undefined,

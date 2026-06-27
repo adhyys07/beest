@@ -206,6 +206,7 @@
   // Survives the redirect to the Lookout recorder so the half-written devlog
   // (and its attached recording) is restored when the user comes back.
   const DEVLOG_DRAFT_KEY = 'beest:devlog-lookout-draft';
+  const DEVLOG_AUTOSAVE_KEY = 'beest:devlog-autosave';
 
   function selectDefaultDevlogLookoutSession(sessions: LookoutSessionOption[]) {
     const selectable = getSelectableDevlogLookoutSessions(sessions);
@@ -226,6 +227,25 @@
       return bTime - aTime;
     });
   }
+
+  $effect(() =>{
+    if (typeof localStorage === 'undefined') return;
+    const hasContent =
+      devlogTitle.trim() || devlogText.trim() || devlogProjectId || devlogLookoutSessionId;
+    if (!hasContent) {
+      localStorage.removeItem(DEVLOG_AUTOSAVE_KEY);
+      return;
+    }
+    localStorage.setItem(
+      DEVLOG_AUTOSAVE_KEY,
+      JSON.stringify({
+        title: devlogTitle,
+        text: devlogText,
+        projectId: devlogProjectId,
+        lookoutSessionId: devlogLookoutSessionId,
+      }),
+    );
+  });
 
   function getSelectableDevlogLookoutSessions(sessions: LookoutSessionOption[]) {
     return sortDevlogLookoutSessions(sessions).filter((session) => session.status !== 'failed');
@@ -328,6 +348,26 @@
       devlogFormOpen = true;
       activeSection = 'devlogs';
       fetchDevlogs();
+      return true;
+    } catch { /* malformed draft — ignore */ }
+    return false;
+  }
+
+  // Restore a locally autosaved draft (survives reload / window close). The
+  // Lookout sessionStorage draft above takes precedence when both exist.
+  function restoreDevlogAutosave() {
+    let raw: string | null = null;
+    try {
+      raw = localStorage.getItem(DEVLOG_AUTOSAVE_KEY);
+    } catch { return; }
+    if (!raw) return;
+    try {
+      const draft = JSON.parse(raw);
+      devlogTitle = draft.title ?? '';
+      devlogText = draft.text ?? '';
+      devlogProjectId = draft.projectId ?? '';
+      devlogLookoutSessionId = draft.lookoutSessionId ?? null;
+      if (devlogTitle || devlogText || devlogProjectId) devlogFormOpen = true;
     } catch { /* malformed draft — ignore */ }
   }
   const DEVLOG_TITLE_MAX = 120;
@@ -1561,7 +1601,8 @@
     fetchUnreadCount();
     loadSectionData(activeSection);
     // Returning from the Lookout recorder? Re-open the devlog draft we stashed.
-    restoreDevlogDraft();
+    // Otherwise fall back to the locally autosaved draft (reload / window close).
+    if (!restoreDevlogDraft()) restoreDevlogAutosave();
     updateEventCountdown();
     const countdownTimer = window.setInterval(updateEventCountdown, 1000);
 
@@ -2989,14 +3030,24 @@
                 {/if}
                 {#if dl.lookout}
                   <div class="devlog-card-lookout">
-                    <span class="lookout-status">{dl.lookout.status}</span>
-                    {#if dl.lookout.trackedSeconds}
-                      <span class="lookout-tracked"> · {fmtTrackedShort(dl.lookout.trackedSeconds)}</span>
-                    {/if}
                     {#if dl.lookout.status === 'complete' && dl.lookout.videoUrl}
-                      <video controls preload="metadata" poster={dl.lookout.thumbnailUrl ?? undefined} src={dl.lookout.videoUrl}>
-                        <track kind="captions" />
-                      </video>
+                      <details class="lookout-dropdown">
+                        <summary class="lookout-summary">
+                        <span class="lookout-status">{dl.lookout.status}</span>
+                          {#if dl.lookout.trackedSeconds}
+                            <span class="lookout-tracked"> · {fmtTrackedShort(dl.lookout.trackedSeconds)}</span>
+                          {/if}
+                          <span class="lookout-summary-action">See Timelapse</span>
+                        </summary>
+                        <video controls preload="metadata" poster={dl.lookout.thumbnailUrl ?? undefined} src={dl.lookout.videoUrl}>
+                          <track kind="captions" />
+                        </video>
+                      </details>
+                    {:else}
+                      <span class="lookout-status">{dl.lookout.status}</span>
+                      {#if dl.lookout.trackedSeconds}
+                        <span class="lookout-tracked"> · {fmtTrackedShort(dl.lookout.trackedSeconds)}</span>
+                      {/if}
                     {/if}
                   </div>
                 {/if}
@@ -4758,6 +4809,39 @@
     font-size: 0.8rem;
     opacity: 0.7;
   }
+
+  .lookout-dropdown summary{
+    cursor:pointer;
+    list-style: none;
+    display: flex;
+    align-items: center;
+    gap: 0.4rem;
+    user-select:none;
+  }
+
+  .lookout-dropdown-summary::-webkit-details-marker {
+    display: none;
+  }
+
+  .lookout-summary-action{
+    margin-left: auto;
+    font-size: 0.8rem;
+    opacity: 0.7;
+  }
+
+  .lookout-summary-action::before {
+    content: '▸ ';
+  }
+  .lookout-dropdown[open] .lookout-summary-action::before {
+    content: '▾ ';
+  }
+  .lookout-dropdown[open] .lookout-summary-action::after {
+    content: ' (hide)';
+  }
+  .lookout-dropdown video {
+    margin-top: 0.5rem;
+  }
+
   .optional {
     font-weight: 400;
     font-size: 0.75rem;
