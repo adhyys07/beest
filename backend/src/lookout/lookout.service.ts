@@ -1,7 +1,7 @@
 import { BadRequestException, Injectable, Logger } from "@nestjs/common";
 import { ConfigService } from "@nestjs/config";
 import { InjectRepository } from "@nestjs/typeorm";
-import { In, IsNull, Repository } from "typeorm";
+import { In, IsNull, LessThan, Repository } from "typeorm";
 import { fetchWithTimeout } from "src/fetch.util";
 import { LookoutSession } from "src/entities/lookout-session.entity";
 
@@ -110,7 +110,8 @@ export class LookoutService {
 
             return {
                 id: row.id,
-                name: str(s.name) ?? str(s.title) ?? str(s.label) ?? null,  //
+                // Lookout returns `name`; title/label are defensive fallbacks.
+                name: str(s.name) ?? str(s.title) ?? str(s.label) ?? null,
                 status,
                 trackedSeconds: num(body?.trackedSeconds) ?? num(s.trackedSeconds),
                 screenshotCount: num(body?.screenshotCount) ?? num(s.screenshotCount),
@@ -123,6 +124,16 @@ export class LookoutService {
             return null;
         }
     }
+
+    async pruneStaleUnattached(maxAgems = 7 * 24 * 60 * 60 * 1000): Promise<number> {
+        const cutoff = new Date(Date.now() - maxAgems);
+        const res = await this.sessionRepo.delete({
+            devlogId: IsNull(),
+            createdAt: LessThan(cutoff),
+        });
+        return res.affected ?? 0;
+    }
+
 
     async listForReview(rows: LookoutSession[]): Promise<LookoutSessionDTO[]> {
         if (!this.configured || rows.length === 0) return [];
@@ -154,6 +165,7 @@ export class LookoutService {
         projectId: string,
         userId: string,
     ): Promise<LookoutSessionDTO[]> {
+        void this.pruneStaleUnattached().catch(() => {});
         const rows = await this.sessionRepo.find({
             where: { projectId, userId, devlogId: IsNull() },
             order: { createdAt: 'DESC' },

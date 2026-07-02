@@ -268,7 +268,7 @@ export class ShopService {
         pipesSpent: totalCost,
         itemName: item.name,
         status: 'pending',
-        fulfillmentNote: note,
+        fulfillmentNotes: note,
       });
       const savedOrder = await manager.save(Order, order);
 

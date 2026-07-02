@@ -385,6 +385,8 @@
 			videoUrl: string | null;
 			thumbnailUrl: string | null;
 		} | null;
+		approved: boolean;
+		approvedHours: number | null;
 		createdAt: string;
 	};
 	let projectDevlogs = $state<DevlogRecord[]>([]);
@@ -423,6 +425,37 @@
 			projectDevlogs = [];
 		}
 	}
+
+	let devlogHoursDraft = $state<Record<string, string>>({});
+	let devlogReviewLoading = $state('');
+
+	let devlogApprovedHours = $derived(
+  		projectDevlogs.reduce((s, d) => s + (d.approved ? (d.approvedHours ?? 0) : 0), 0)
+	);
+
+	async function reviewDevlog(dl: DevlogRecord, approved: boolean){
+		const raw = devlogHoursDraft[dl.id] ?? String(dl.approvedHours ?? '');
+		const hours = parseFloat(raw);
+		devlogReviewLoading = dl.id;
+		try{
+    		const res = await fetch(`/api/admin/devlogs/${dl.id}/review`, {
+				method: 'PATCH',
+				headers: { 'Content-Type': 'application/json'},
+      			body: JSON.stringify({ approved, approvedHours: Number.isFinite(hours) ? hours : null }),
+		});
+		if (res.ok){
+			const data = await res.json();
+			dl.approved = data.approved;
+			dl.approvedHours = data.approvedHours;
+			if (expandedProjectId){
+				const ht = await fetch(`/api/admin/projects/${expandedProjectId}/hackatime`);
+       			 if (ht.ok) hackatimeData = await ht.json();
+			}
+		}
+	}	finally{
+		devlogReviewLoading = '';
+	}
+}
 
 	async function loadProjectLookout(projectId: string) {
 		try {
@@ -1630,7 +1663,7 @@
 			country: string | null;
 		} | null;
 		phone: string | null;
-		fulfillmentNote : string | null;
+		fulfillmentNotes : string | null;
 		addressMissing: boolean;
 		projects: { id: string; name: string; projectType: string | null; hours: number | null; approvedAt: string }[];
 	};
@@ -2370,10 +2403,10 @@
 												<div class="order-detail-error">Failed to load order detail. <button class="link-btn" onclick={() => toggleOrderRow(order.id)}>Retry</button></div>
 											{:else}
 												<div class="order-detail">
-													{#if detail.fulfillmentNote}
+													{#if detail.fulfillmentNotes}
 														<div class="order-detail-section order-note-callout">
 															<h4 class="order-detail-heading">Buyer note</h4>
-															<p class="order-note-text">{detail.fulfillmentNote}</p>
+															<p class="order-note-text">{detail.fulfillmentNotes}</p>
 														</div>
 													{/if}
 													<div class="order-detail-section">
@@ -3178,7 +3211,10 @@
 
 								{#if projectDevlogs.length > 0}
 									<hr class="proj-divider" />
-									<h4 class="reviews-heading">Devlogs ({projectDevlogs.length})</h4>
+									<h4 class="reviews-heading">
+										Devlogs ({projectDevlogs.length})
+										{#if devlogApprovedHours > 0}<span class="devlog-approved-total"> · {Math.round(devlogApprovedHours * 10) / 10}h approved into project</span>{/if}
+									</h4>
 									<div class="devlogs-list">
 										{#each projectDevlogs as dl}
 											<div class="devlog-card">
@@ -3212,6 +3248,34 @@
 														{/if}
 													</div>
 												{/if}
+											<div class="devlog-review-bar">
+												<label class="devlog-hours-field">
+													Hours
+													<input
+														type="number" min="0" step="0.1"
+														class="devlog-hours-input"
+														value={devlogHoursDraft[dl.id] ?? (dl.approvedHours ?? '')}
+														oninput={(e) => devlogHoursDraft[dl.id] = e.currentTarget.value}
+													/>
+												</label>
+												{#if dl.lookout?.trackedSeconds}
+													<button type="button" class="devlog-hours-suggest"
+														onclick={() => devlogHoursDraft[dl.id] = ((dl.lookout?.trackedSeconds ?? 0) / 3600).toFixed(1)}
+														title="Use the attached timelapse's tracked time">
+														lapse: {fmtLookoutTracked(dl.lookout?.trackedSeconds ?? null)}
+													</button>
+												{/if}
+												{#if dl.approved}
+													<span class="devlog-approved-tag">✓ {dl.approvedHours}h approved</span>
+													<button type="button" class="devlog-unapprove" disabled={devlogReviewLoading === dl.id}
+														onclick={() => reviewDevlog(dl, false)}>Unapprove</button>
+												{:else}
+													<button type="button" class="devlog-approve" disabled={devlogReviewLoading === dl.id}
+														onclick={() => reviewDevlog(dl, true)}>
+														{devlogReviewLoading === dl.id ? 'Saving…' : 'Approve'}
+													</button>
+												{/if}
+											</div>
 											</div>
 										{/each}
 									</div>
@@ -5078,6 +5142,75 @@
 	.devlog-card-date {
 		color: #777;
 		margin-left: auto;
+	}
+
+	.devlog-review-bar {
+		display: flex;
+		align-items: center;
+		gap: 0.6rem;
+		flex-wrap: wrap;
+		margin-top: 0.6rem;
+		padding-top: 0.6rem;
+		border-top: 1px dashed rgba(255, 255, 255, 0.12);
+	}
+	.devlog-hours-field {
+		display: flex;
+		align-items: center;
+		gap: 0.35rem;
+		font-size: 0.8rem;
+		color: #aaa;
+	}
+	.devlog-hours-input {
+		width: 5rem;
+		padding: 0.2rem 0.4rem;
+		border: 1px solid #555;
+		border-radius: 4px;
+		background: #1e1e1e;
+		color: inherit;
+		font: inherit;
+	}
+	.devlog-hours-suggest {
+		border: 1px solid #4a6;
+		background: transparent;
+		color: #6c9;
+		border-radius: 4px;
+		padding: 0.2rem 0.5rem;
+		font-size: 0.75rem;
+		cursor: pointer;
+	}
+	.devlog-approve,
+	.devlog-unapprove {
+		border-radius: 4px;
+		padding: 0.25rem 0.7rem;
+		font-size: 0.8rem;
+		font-weight: 700;
+		cursor: pointer;
+		border: 1px solid;
+	}
+	.devlog-approve {
+		background: #2a7;
+		border-color: #2a7;
+		color: #fff;
+	}
+	.devlog-unapprove {
+		background: transparent;
+		border-color: #888;
+		color: #ccc;
+	}
+	.devlog-approve:disabled,
+	.devlog-unapprove:disabled {
+		opacity: 0.5;
+		cursor: default;
+	}
+	.devlog-approved-tag {
+		font-size: 0.8rem;
+		font-weight: 700;
+		color: #5a9e6f;
+	}
+	.devlog-approved-total {
+		font-size: 0.8rem;
+		font-weight: 600;
+		color: #5a9e6f;
 	}
 
 	.devlog-card-title {

@@ -370,6 +370,20 @@ export class AdminController {
     return this.devlogsService.findByProject(id, isSuperAdmin);
   }
 
+  @UseGuards(ReviewerGuard)
+  @Patch('devlogs/:id/review')
+  reviewDevlog(
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body() body: { approved?: boolean; approvedHours?: number | null },
+    @Req() req: Request,
+  ) {
+    const reviewerId = (req as any).user?.uid;
+    return this.devlogsService.reviewDevlog(id, reviewerId, {
+      approved: body.approved === true,
+      approvedHours: typeof body.approvedHours === 'number' ? body.approvedHours : null,
+    });
+  }
+  
   /**
    * All Lookout timelapses for this project plus the total tracked time across
    * complete sessions. Surfaced in the review dashboard.

@@ -62,6 +62,18 @@ export class Devlog {
   })
   imageUrls: string[];
 
+  @Column({ type: 'boolean', default: false })
+  approved: boolean;
+
+  @Column({ name: 'approved_hours', type: 'real', nullable: true })
+  approvedHours: number | null;
+
+  @Column({ name: 'approved_by_reviewer_id', type: 'uuid', nullable: true })
+  approvedByReviewerId: string | null;
+
+  @Column({ name: 'approved_at', type: 'timestamptz', nullable: true })
+  approvedAt: Date | null;
+
   @CreateDateColumn({ name: 'created_at' })
   createdAt: Date;
 }

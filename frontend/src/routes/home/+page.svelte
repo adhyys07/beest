@@ -262,8 +262,15 @@
     );
   });
 
+  const LOOKOUT_INPROGRESS_WINDOW_MS = 30 * 60 * 1000;
   function getSelectableDevlogLookoutSessions(sessions: LookoutSessionOption[]) {
-    return sortDevlogLookoutSessions(sessions).filter((session) => session.status !== 'failed');
+    const now = Date.now();
+    return sortDevlogLookoutSessions(sessions).filter((session) => {
+      if (session.status === 'failed') return false;
+      if (session.status === 'complete') return true;
+      const created = session.createdAt ? Date.parse(session.createdAt) : now;
+      return now - created < LOOKOUT_INPROGRESS_WINDOW_MS;
+    });
   }
 
   async function fetchDevlogLookoutSessions(projectId: string) {

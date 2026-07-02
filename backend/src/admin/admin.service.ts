@@ -2260,7 +2260,7 @@ export class AdminService {
       country: string | null;
     } | null;
     phone : string | null;
-    fulfillmentNote: string | null;
+    fulfillmentNotes: string | null;
     addressMissing: boolean;
     projects: {
       id: string;
@@ -2310,7 +2310,7 @@ export class AdminService {
     return {
       address,
       phone,
-      fulfillmentNote: order.fulfillmentNote ?? null,
+      fulfillmentNotes: order.fulfillmentNotes ?? null,
       addressMissing: !address,
       projects: projects.map((p) => ({
         id: p.id,

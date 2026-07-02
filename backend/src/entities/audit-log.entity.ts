@@ -30,6 +30,7 @@ export const AUDIT_ACTIONS = [
   'order_merged',
   'devlog_created',
   'devlog_deleted',
+  'devlog_reviewed',
   'hcb_connected',
   'card_grant_issued',
 ] as const;

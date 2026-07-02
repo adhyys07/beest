@@ -7,7 +7,7 @@ import {
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository } from 'typeorm';
+import { DataSource, Repository } from 'typeorm';
 import { Devlog } from '../entities/devlog.entity';
 import { Project } from '../entities/project.entity';
 import { fetchWithTimeout } from '../fetch.util';
@@ -44,6 +44,7 @@ export class DevlogsService {
     private configService: ConfigService,
     private auditLogService: AuditLogService,
     private lookoutService: LookoutService,
+    private dataSource: DataSource,
     @InjectRepository(Devlog) private devlogRepo: Repository<Devlog>,
     @InjectRepository(Project) private projectRepo: Repository<Project>,
   ) {
@@ -124,6 +125,8 @@ export class DevlogsService {
       text: d.text,
       imageUrls: d.imageUrls ?? [],
       lookout: lookouts.get(d.id) ?? null,
+      approved: d.approved,
+      approvedHours: d.approvedHours,
       createdAt: d.createdAt,
     }));
   }
@@ -138,6 +141,57 @@ export class DevlogsService {
     await this.auditLogService.log(userId, 'devlog_deleted', `Deleted devlog ${id}`);
     return { ok: true };
   }
+
+  async reviewDevlog(
+    devlogId: string,
+    reviewerId: string,
+    dto: { approved: boolean; approvedHours: number | null }) {
+      const devlog = await this.devlogRepo.findOne({ where: { id: devlogId } });
+      if (!devlog) throw new BadRequestException('Devlog not found'); 
+      if (!devlog.projectId) throw new BadRequestException('Devlog is not linked to a project');
+
+      const hours = 
+        dto.approved && typeof dto.approvedHours === 'number' && dto.approvedHours >= 0
+          ? Math.round(Math.min(dto.approvedHours, 1000) * 10) / 10
+          : 0;
+
+      const previous = devlog.approved ? devlog.approvedHours ?? 0 : 0;
+      const delta = Math.round((hours - previous) * 10) / 10;
+
+      return this.dataSource.transaction(async (manager) => {
+        if (delta != 0) {
+          const project = await manager.findOne(Project, { where: { id: devlog.projectId! }, lock: { mode: 'pessimistic_write' } });
+          if (project) {
+            const next = Math.round(((project.overrideHours ?? 0) + delta) * 10) / 10;
+            project.overrideHours = Math.max(0, next);
+            await manager.save(Project, project);
+          }
+        }
+        devlog.approved = dto.approved;
+        devlog.approvedHours = dto.approved ? hours : null;
+        devlog.approvedByReviewerId = reviewerId;
+        devlog.approvedAt = new Date();
+        await manager.save(Devlog, devlog);
+
+        await this.auditLogService.log(
+          reviewerId,
+          'devlog_reviewed',
+          `${dto.approved ? 'Approved' : 'Unapproved'} devlog "${devlog.title}" (${hours}h, Δ${delta}h) on project ${devlog.projectId}`,
+      );
+      return { id: devlog.id, approved: devlog.approved, approvedHours: devlog.approvedHours};
+    });
+  }
+  
+  async approvedHoursForProject(projectId: string): Promise<number> {
+  const { sum } = await this.devlogRepo
+    .createQueryBuilder('d')
+    .select('COALESCE(SUM(d.approved_hours), 0)', 'sum')
+    .where('d.project_id = :projectId', { projectId })
+    .andWhere('d.approved = true')
+    .getRawOne<{ sum: string }>() ?? { sum: '0' };
+  return Math.round(parseFloat(sum) * 10) / 10;
+  } 
+  
 
   /* ---------------------------------------------------------------- */
   /*  Validation helpers                                               */
