@@ -77,13 +77,13 @@
 	let userSearch = $state('');
 	let permsFilter = $state('');
 	let selectedUser: UserSummary | null = $state(null);
-	let userDetail: UserDetail | null = $state(null);
+	let userDetail = $state<UserDetail | null>(null);
 	let detailLoading = $state(false);
 	let showPermsDropdown = $state(false);
 	let actionLoading = $state('');
 	let lightMode = $state(false);
 	let showHackatimeFiles = $state(false);
-
+	let showLookoutVideos = $state(false);
 	// News state
 	let newsItems: NewsItem[] = $state([]);
 	let newsLoading = $state(false);
@@ -388,6 +388,20 @@
 		createdAt: string;
 	};
 	let projectDevlogs = $state<DevlogRecord[]>([]);
+	type LookoutSessionRecord = {
+		id: string;
+		name: string | null;
+		status: string;
+		trackedSeconds: number | null;
+		videoUrl: string | null;
+		thumbnailUrl: string | null;
+		createdAt: string | null;
+	};
+	let projectLookout = $state<{ sessions: LookoutSessionRecord[]; totalTrackedSeconds: number; completeCount: number } | null>(null);
+	// Lapse time (complete sessions only) folded into the project's total time.
+	let lookoutHours = $derived(
+		projectLookout ? Math.round((projectLookout.totalTrackedSeconds / 3600) * 10) / 10 : 0
+	);
 	let devlogLightbox = $state<string | null>(null);
 	function openDevlogLightbox(url: string) { devlogLightbox = url; }
 	function closeDevlogLightbox() { devlogLightbox = null; }
@@ -407,6 +421,15 @@
 			else projectDevlogs = [];
 		} catch {
 			projectDevlogs = [];
+		}
+	}
+
+	async function loadProjectLookout(projectId: string) {
+		try {
+			const res = await fetch(`/api/admin/projects/${projectId}/lookout`);
+			projectLookout = res.ok ? await res.json() : null;
+		} catch {
+			projectLookout = null;
 		}
 	}
 
@@ -630,6 +653,7 @@
 			lastQuickRejectInternalNote = '';
 			hideReviewerName = false;
 			projectDevlogs = [];
+			projectLookout = null;
 			closeAuditEmbed();
 			syncProjectUrl(null);
 			return;
@@ -650,11 +674,13 @@
 		showHackatimeFiles = false;
 		pastReviews = [];
 		projectDevlogs = [];
+		projectLookout = null;
 
 		const proj = allProjects.find(p => p.id === projectId);
 		persistentUserNote = proj?.user?.reviewerUserNote ?? '';
 		loadReviews(projectId);
 		loadProjectDevlogs(projectId);
+		loadProjectLookout(projectId);
 		if (proj?.status === 'unreviewed' || proj?.status === 'approved') {
 			hackatimeLoading = true;
 			try {
@@ -1603,6 +1629,8 @@
 			postalCode: string | null;
 			country: string | null;
 		} | null;
+		phone: string | null;
+		fulfillmentNote : string | null;
 		addressMissing: boolean;
 		projects: { id: string; name: string; projectType: string | null; hours: number | null; approvedAt: string }[];
 	};
@@ -1628,6 +1656,10 @@
 		} catch {
 			orderDetails[orderId] = 'error';
 		}
+	}
+
+	function slackDmUrl(slackId: string | null): string | null {
+		return slackId ? `https://slack.com/app_redirect?channel=${encodeURIComponent(slackId)}` : null;
 	}
 
 	async function copyAddressLine(key: string, value: string | null | undefined) {
@@ -2282,7 +2314,11 @@
 								{@const isOpen = expandedOrderId === order.id}
 								<tr class:fulfilled={order.status === 'fulfilled'} class:order-row={true} class:order-row-open={isOpen} onclick={() => toggleOrderRow(order.id)} onkeydown={(e) => { const tag = (e.target as HTMLElement).tagName; if ((e.key === 'Enter' || e.key === ' ') && tag !== 'INPUT' && tag !== 'TEXTAREA' && tag !== 'SELECT') { e.preventDefault(); toggleOrderRow(order.id); } }} tabindex="0" role="button" aria-expanded={isOpen}>
 									<td><span class="order-row-toggle" aria-hidden="true">{isOpen ? '▾' : '▸'}</span> {order.itemName}</td>
-									<td>{order.userName}{order.userEmail ? ` (${order.userEmail})` : ''}</td>
+									<td>{order.userName}{order.userEmail ? ` (${order.userEmail})` : ''}
+										{#if order.userSlackId}
+											<a class="order-slack-dm" href={slackDmUrl(order.userSlackId)} target="_blank" title={`DM ${order.userName} on Slack (${order.userSlackId})`} rel="noopener" onclick={(e) => e.stopPropagation()}>DM {order.userSlackId}</a>
+										{/if}
+									</td>
 									<td>{order.quantity}</td>
 									<td>{order.pipesSpent}</td>
 									<td><span class="status-badge" class:status-pending={order.status === 'pending'} class:status-fulfilled={order.status === 'fulfilled'}>{order.status}</span></td>
@@ -2334,6 +2370,12 @@
 												<div class="order-detail-error">Failed to load order detail. <button class="link-btn" onclick={() => toggleOrderRow(order.id)}>Retry</button></div>
 											{:else}
 												<div class="order-detail">
+													{#if detail.fulfillmentNote}
+														<div class="order-detail-section order-note-callout">
+															<h4 class="order-detail-heading">Buyer note</h4>
+															<p class="order-note-text">{detail.fulfillmentNote}</p>
+														</div>
+													{/if}
 													<div class="order-detail-section">
 														<h4 class="order-detail-heading">Shipping address <span class="order-detail-hint">(click any line to copy)</span></h4>
 														{#if detail.addressMissing || !detail.address}
@@ -2375,6 +2417,23 @@
 																	</li>
 																{/if}
 															</ul>
+														{/if}
+													</div>
+													<div class="order-detail-section">
+														<h4 class = "order-detail-heading">Contact</h4>
+														{#if detail.phone}
+															{@const ok =`${order.id}:phone`}
+															<ul class = "address-lines">
+																<li>
+																	<button type="button" class="address-line" class:copied={copiedKey === ok} onclick={() => copyAddressLine(ok, detail.phone)} title="Click to copy">
+																		<span class="address-label">Phone</span>
+																		<span class="address-value">{detail.phone}</span>
+																		<span class="address-copied">{copiedKey === ok ? 'copied!' : 'copy'}</span>
+																	</button>
+																</li>
+															</ul>
+														{:else}
+															<p class="order-detail-empty">No phone number on file in HCA</p>
 														{/if}
 													</div>
 													<div class="order-detail-section">
@@ -2798,10 +2857,12 @@
 														hackatimeData = null;
 														pastReviews = [];
 														projectDevlogs = [];
+														projectLookout = null;
 														await Promise.all([
 															selectProject(p.id),
 															loadReviews(p.id),
-															loadProjectDevlogs(p.id)
+															loadProjectDevlogs(p.id),
+															loadProjectLookout(p.id)
 														]);
 													}}
 													>
@@ -2843,7 +2904,10 @@
 										<div class="ht-detail">
 											<div class="ht-header">
 												<span class="ht-trust">Trust Level: <strong class="trust-{displayTrust || 'unknown'}">{{ blue: 'standard', yellow: 'warned', red: 'banned' }[displayTrust] ?? hackatimeData.trustLevel ?? 'unknown'}</strong></span>
-												<span class="ht-total">{hackatimeData.totalHours}h total</span>
+												<span class="ht-total">
+													{Math.round((hackatimeData.totalHours + lookoutHours) * 10) / 10}h total
+													{#if lookoutHours > 0}<span class="ht-total-note">(Hackatime {hackatimeData.totalHours}h + timelapse {lookoutHours}h)</span>{/if}
+												</span>
 												{#if hackatimeData.earliestHeartbeat}
 													<span class="ht-earliest">first heartbeat: {new Date(hackatimeData.earliestHeartbeat * 1000).toLocaleDateString('en-US', { year: 'numeric', month: 'short', day: 'numeric' })}</span>
 												{/if}
@@ -2861,6 +2925,12 @@
 													perProject={hackatimeData.hackatimeProjects.map((hp) => ({ name: hp.name, hours: hp.hours }))}
 													startDate={hackatimeData.startDate}
 												/>
+												{#if projectLookout && lookoutHours > 0}
+													<div class="ht-lookout-line">
+														<span class="ht-lookout-label">Lookout timelapse ({projectLookout.completeCount} complete)</span>
+														<span class="ht-lookout-hours">{lookoutHours}h</span>
+													</div>
+												{/if}
 											</div>
 
 											<div class="ht-files">
@@ -3060,6 +3130,51 @@
 										</button>
 									</div>
 								{/if}
+
+								{#if projectLookout && projectLookout.sessions.length > 0}
+									<hr class="proj-divider" />
+									<div class="lookout-review-head">
+										<h4 class="reviews-heading">Timelapses ({projectLookout.sessions.length})</h4>
+										<div class="lookout-review-head-right">
+										{#if lookoutHours > 0}
+											<span class="lookout-review-total">{lookoutHours}h tracked · {projectLookout.completeCount} complete</span>
+										{/if}
+										<button
+											type="button"
+											class="ht-files-toggle"
+											onclick={()=> (showLookoutVideos = !showLookoutVideos)}
+											aria-expanded={showLookoutVideos}
+											>
+												{showLookoutVideos ? 'Hide': 'Show'}
+											</button>
+										</div>
+									</div>
+									{#if showLookoutVideos}
+										<div class="lookout-review-grid">
+											{#each projectLookout.sessions as s (s.id)}
+												<div class="lookout-review-card" class:pending={s.status !== 'complete'}>
+													{#if s.status === 'complete' && s.videoUrl}
+														<video controls preload="metadata" poster={s.thumbnailUrl ?? undefined} src={s.videoUrl}>
+															<track kind="captions" />
+														</video>
+													{:else if s.thumbnailUrl}
+														<img src={s.thumbnailUrl} alt="Timelapse thumbnail" loading="lazy" />
+													{:else}
+														<div class="lookout-review-novid">No preview</div>
+													{/if}
+													<div class="lookout-review-meta">
+														<span class="lookout-review-name">{s.name ?? (s.status === 'complete' ? 'Timelapse' : s.status)}</span>
+														<span class="lookout-review-sub">
+															{#if s.trackedSeconds}{fmtLookoutTracked(s.trackedSeconds)} · {/if}
+															{s.createdAt ? formatDate(s.createdAt) : 'recent'}
+															{#if s.status !== 'complete'} · {s.status}{/if}
+														</span>
+													</div>
+												</div>
+											{/each}
+											</div>
+											{/if}
+										{/if}
 
 								{#if projectDevlogs.length > 0}
 									<hr class="proj-divider" />
@@ -3985,7 +4100,8 @@
 	.proj-sidebar-meta {
 		display: flex;
 		align-items: center;
-		gap: 0.5rem;
+		flex-wrap: wrap;
+		gap: 0.35rem 0.5rem;
 		color: #888;
 		font-size: 0.75rem;
 	}
@@ -4018,6 +4134,10 @@
 		background: rgba(251, 191, 36, 0.15);
 		color: #d97706;
 		border: 1px solid rgba(251, 191, 36, 0.4);
+		max-width: 100%;
+		white-space: nowrap;
+		overflow: hidden;
+		text-overflow: ellipsis;
 	}
 	.claim-badge--mine {
 		background: rgba(59, 130, 246, 0.12);
@@ -5079,6 +5199,88 @@
 		gap: 0.75rem;
 	}
 
+	.ht-total-note {
+		font-size: 0.78rem;
+		font-weight: 400;
+		opacity: 0.7;
+		margin-left: 0.35rem;
+	}
+	.ht-lookout-line {
+		display: flex;
+		align-items: baseline;
+		justify-content: space-between;
+		gap: 0.5rem;
+		margin-top: 0.5rem;
+		padding-top: 0.5rem;
+		border-top: 1px dashed rgba(255, 255, 255, 0.15);
+	}
+	.ht-lookout-label {
+		font-size: 0.85rem;
+		opacity: 0.85;
+	}
+	.ht-lookout-hours {
+		font-weight: 700;
+		color: #5a9e6f;
+	}
+	.lookout-review-head {
+		display: flex;
+		align-items: baseline;
+		justify-content: space-between;
+		gap: 0.5rem;
+	}
+	.lookout-review-head-right {
+		display:flex;
+		align-items:center;
+		gap: 0.6rem;
+	}
+	.lookout-review-total {
+		font-size: 0.85rem;
+		font-weight: 700;
+		color: #5a9e6f;
+	}
+	.lookout-review-grid {
+		display: grid;
+		grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+		gap: 0.75rem;
+		margin-top: 0.5rem;
+	}
+	.lookout-review-card {
+		border-radius: 8px;
+		overflow: hidden;
+		background: rgba(0, 0, 0, 0.15);
+	}
+	.lookout-review-card.pending {
+		opacity: 0.6;
+	}
+	.lookout-review-card video,
+	.lookout-review-card img {
+		width: 100%;
+		aspect-ratio: 16 / 9;
+		object-fit: cover;
+		display: block;
+	}
+	.lookout-review-novid {
+		display: grid;
+		place-items: center;
+		aspect-ratio: 16 / 9;
+		font-size: 0.8rem;
+		opacity: 0.5;
+	}
+	.lookout-review-meta {
+		display: flex;
+		flex-direction: column;
+		gap: 0.15rem;
+		padding: 0.5rem;
+	}
+	.lookout-review-name {
+		font-weight: 700;
+		font-size: 0.85rem;
+	}
+	.lookout-review-sub {
+		font-size: 0.75rem;
+		opacity: 0.7;
+	}
+
 	.ht-header {
 		display: flex;
 		flex-wrap: wrap;
@@ -6023,6 +6225,22 @@
 		background: rgba(0,0,0,0.18);
 		border-top: 1px dashed rgba(255,255,255,0.08);
 	}
+
+	.order-slack-dm {
+		margin-left: 8px;
+		padding: 1px 7px;
+		border: 1px solid #4a154b;
+		border-radius: 4px;
+		background: #4a154b;
+		color: #fff;
+		font-size: 0.8rem;
+		text-decoration: none;
+		white-space: nowrap;
+	}
+
+	.order-slack-dm:hover { background: #4a154b; }
+	.order-slack-dm-line { text-decoration: none; }
+
 	.admin-shell.light .order-detail-row td { background: rgba(0,0,0,0.03); border-top-color: rgba(0,0,0,0.08); }
 
 	.order-detail {
@@ -6030,6 +6248,17 @@
 		grid-template-columns: minmax(260px, 1fr) minmax(260px, 1.4fr);
 		gap: 1.5rem;
 	}
+
+	.order-note-callout {
+		border-left: 3px solid #d8a657;
+		padding-left: 0.6rem;
+	}
+
+	.order-note-text {
+		white-space: pre-wrap;
+		font-size: 0.9rem;
+	}
+	
 	.order-detail-section { min-width: 0; }
 	.order-detail-heading {
 		margin: 0 0 0.5rem;

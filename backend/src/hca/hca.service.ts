@@ -18,6 +18,7 @@ export interface HcaIdentity {
   email?: string;
   name?: string;
   birthdate?: string;
+  phone_number?: string;
   address?: HcaAddress;
   [key: string]: unknown;
 }

@@ -13,6 +13,7 @@ export type CreatedSession = {
 
 export type LookoutSessionDTO = {
     id: string;
+    name: string | null;
     status: string;
     trackedSeconds: number | null;
     screenshotCount: number | null;
@@ -109,6 +110,7 @@ export class LookoutService {
 
             return {
                 id: row.id,
+                name: str(s.name) ?? str(s.title) ?? str(s.label) ?? null,  //
                 status,
                 trackedSeconds: num(body?.trackedSeconds) ?? num(s.trackedSeconds),
                 screenshotCount: num(body?.screenshotCount) ?? num(s.screenshotCount),
@@ -157,6 +159,28 @@ export class LookoutService {
             order: { createdAt: 'DESC' },
         });
         return this.listForReview(rows);
+    }
+
+    /**
+     * All Lookout sessions for a project (reviewer dashboard), newest first,
+     * enriched with live status/tracked time. Returns the sessions plus the
+     * total tracked seconds across *complete* sessions only — pending/processing
+     * report no verifiable time, so they contribute 0.
+     */
+    async listForProjectReview(
+        projectId: string,
+    ): Promise<{ sessions: LookoutSessionDTO[]; totalTrackedSeconds: number; completeCount: number }> {
+        const rows = await this.sessionRepo.find({
+            where: { projectId },
+            order: { createdAt: 'DESC' },
+        });
+        const sessions = await this.listForReview(rows);
+        const complete = sessions.filter((s) => s.status === 'complete');
+        const totalTrackedSeconds = complete.reduce(
+            (sum, s) => sum + (s.trackedSeconds ?? 0),
+            0,
+        );
+        return { sessions, totalTrackedSeconds, completeCount: complete.length };
     }
 
     /**

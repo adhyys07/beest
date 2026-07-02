@@ -2259,6 +2259,8 @@ export class AdminService {
       postalCode: string | null;
       country: string | null;
     } | null;
+    phone : string | null;
+    fulfillmentNote: string | null;
     addressMissing: boolean;
     projects: {
       id: string;
@@ -2273,7 +2275,7 @@ export class AdminService {
       relations: ['user'],
     });
     if (!order) throw new NotFoundException('Order not found');
-
+ 
     const user = order.user;
 
     const [identity, projects] = await Promise.all([
@@ -2303,9 +2305,12 @@ export class AdminService {
           country: addr.country ?? null,
         }
       : null;
+    const phone = identity?.phone_number?.trim() || null;
 
     return {
       address,
+      phone,
+      fulfillmentNote: order.fulfillmentNote ?? null,
       addressMissing: !address,
       projects: projects.map((p) => ({
         id: p.id,

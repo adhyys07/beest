@@ -23,6 +23,7 @@ import { AuditLogService } from '../audit-log/audit-log.service';
 import { AuthService } from '../auth/auth.service';
 import { ShopService } from '../shop/shop.service';
 import { DevlogsService } from '../devlogs/devlogs.service';
+import { LookoutService } from '../lookout/lookout.service';
 
 @Controller('api/admin')
 export class AdminController {
@@ -33,6 +34,7 @@ export class AdminController {
     private readonly authService: AuthService,
     private readonly shopService: ShopService,
     private readonly devlogsService: DevlogsService,
+    private readonly lookoutService: LookoutService,
   ) {}
 
   @UseGuards(FulfillerGuard)
@@ -366,6 +368,16 @@ export class AdminController {
   getProjectDevlogs(@Param('id', ParseUUIDPipe) id: string, @Req() req: Request) {
     const isSuperAdmin = (req as any).user?.perms === 'Super Admin';
     return this.devlogsService.findByProject(id, isSuperAdmin);
+  }
+
+  /**
+   * All Lookout timelapses for this project plus the total tracked time across
+   * complete sessions. Surfaced in the review dashboard.
+   */
+  @UseGuards(ReviewerGuard)
+  @Get('projects/:id/lookout')
+  getProjectLookout(@Param('id', ParseUUIDPipe) id: string) {
+    return this.lookoutService.listForProjectReview(id);
   }
 
   @UseGuards(ReviewerGuard)

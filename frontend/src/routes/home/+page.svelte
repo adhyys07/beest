@@ -142,6 +142,9 @@
   let purchaseLoading = $state(false);
   let purchaseError = $state('');
   let purchaseSuccess = $state('');
+  // Checkout note popup: buyers can leave a note for the fulfillers.
+  let notePromptOpen = $state(false);
+  let orderNote = $state('');
 
   // User's own orders (shown at the bottom of the shop)
   type UserOrderType = { id: string; itemName: string; quantity: number; pipesSpent: number; status: string; createdAt: string };
@@ -166,6 +169,7 @@
   type DevlogType = { id: string; projectId: string | null; title: string; text: string; imageUrls: string[]; lookout: LookoutDevlog; createdAt: string };
   type LookoutSessionOption = {
     id: string;
+    name: string | null;
     status: string;
     trackedSeconds: number | null;
     screenshotCount: number | null;
@@ -177,6 +181,8 @@
   let devlogsLoading = $state(false);
   let devlogFormOpen = $state(false);
   let devlogLightbox = $state<string | null>(null);
+  // Whether the "select a timelapse" popup is open.
+  let lookoutPickerOpen = $state(false);
 
   // Show the create form upfront when there are no devlogs yet; otherwise
   // keep it tucked behind a "New devlog" button until the user opens it.
@@ -189,7 +195,19 @@
     devlogLightbox = null;
   }
   function onDevlogLightboxKey(e: KeyboardEvent) {
-    if (e.key === 'Escape') closeDevlogLightbox();
+    if (e.key !== 'Escape') return;
+    if (lookoutPickerOpen) { lookoutPickerOpen = false; return; }
+    closeDevlogLightbox();
+  }
+
+  // Label for the "select a timelapse" button reflecting the current choice.
+  function selectedLookoutLabel(): string {
+    if (!devlogLookoutSessionId) return '🎞️ Select a timelapse';
+    const s = devlogLookoutSessions.find((x) => x.id === devlogLookoutSessionId);
+    if (!s) return '🎞️ Select a timelapse';
+    if (s.name) return `${s.name}`;
+    const time = s.trackedSeconds ? `${fmtTrackedShort(s.trackedSeconds)} · ` : '';
+    return `🎞️ ${time}${s.createdAt ? formatLocal(s.createdAt) : 'recent'}`;
   }
   let devlogTitle = $state('');
   let devlogText = $state('');
@@ -215,15 +233,12 @@
   }
 
   function sortDevlogLookoutSessions(sessions: LookoutSessionOption[]) {
+    // Newest to oldest. (Default selection still prefers a complete session via
+    // selectDefaultDevlogLookoutSession, independent of this ordering.)
+    // A missing createdAt means a just-created session, so treat it as newest.
     return [...sessions].sort((a, b) => {
-      const statusRank = (session: LookoutSessionOption) => {
-        if (session.status === 'complete') return 0;
-        return 1;
-      };
-      const rankDelta = statusRank(a) - statusRank(b);
-      if (rankDelta !== 0) return rankDelta;
-      const aTime = a.createdAt ? Date.parse(a.createdAt) : 0;
-      const bTime = b.createdAt ? Date.parse(b.createdAt) : 0;
+      const aTime = a.createdAt ? Date.parse(a.createdAt) : Infinity;
+      const bTime = b.createdAt ? Date.parse(b.createdAt) : Infinity;
       return bTime - aTime;
     });
   }
@@ -307,7 +322,7 @@
       if (!devlogLookoutSessions.some((session) => session.id === id)) {
         devlogLookoutSessions = [
           ...devlogLookoutSessions,
-          { id, status: 'pending', trackedSeconds: null, screenshotCount: null, videoUrl: null, thumbnailUrl: null, createdAt: null },
+          { id, name: null, status: 'pending', trackedSeconds: null, screenshotCount: null, videoUrl: null, thumbnailUrl: null, createdAt: null },
         ];
       }
       // Stash the in-progress devlog so it (and this recording) survive the
@@ -1329,6 +1344,14 @@
     } catch { /* silent */ }
   }
 
+  // "Redeem" opens the note popup; the popup's confirm button does the purchase.
+  function openNotePrompt() {
+    if (!selectedShopItem || purchaseLoading) return;
+    purchaseError = '';
+    orderNote = '';
+    notePromptOpen = true;
+  }
+
   async function purchaseItem() {
     if (!selectedShopItem || purchaseLoading) return;
     purchaseError = '';
@@ -1338,12 +1361,17 @@
       const res = await fetch('/api/shop/purchase', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ shopItemId: selectedShopItem.id, quantity: shopQuantity })
+        body: JSON.stringify({
+          shopItemId: selectedShopItem.id,
+          quantity: shopQuantity,
+          note: orderNote.trim() || null
+        })
       });
       const data = await res.json();
       if (!res.ok) {
         purchaseError = data.message || 'Purchase failed';
       } else {
+        notePromptOpen = false;
         purchaseSuccess = `Ordered ${shopQuantity}x ${selectedShopItem.name}!`;
         userPipes = data.remainingPipes;
         // Refresh shop items (stock may have changed)
@@ -1352,7 +1380,7 @@
         fetchUserOrders();
         // Refresh unread count
         fetchUnreadCount();
-        setTimeout(() => { closeShopItem(); purchaseSuccess = ''; }, 2000);
+        setTimeout(() => { closeShopItem(); purchaseSuccess = ''; orderNote = ''; }, 2000);
       }
     } catch {
       purchaseError = 'Network error — try again';
@@ -2564,7 +2592,7 @@
             {#if purchaseSuccess}
               <div class="shop-modal-success">{purchaseSuccess}</div>
             {:else if userPipes >= selectedShopItem.priceHours * shopQuantity}
-              <button class="shop-modal-buy" type="button" onclick={purchaseItem} disabled={purchaseLoading}>
+              <button class="shop-modal-buy" type="button" onclick={openNotePrompt} disabled={purchaseLoading}>
                 <span class="buy-text">{purchaseLoading ? 'Ordering...' : 'Redeem'}</span>
               </button>
               {#if purchaseError}
@@ -2577,6 +2605,34 @@
               </div>
             {/if}
           </div>
+        </div>
+      </div>
+    </div>
+    {/if}
+
+    <!-- Order note popup: ask the buyer for a note to the fulfillers -->
+    {#if notePromptOpen && selectedShopItem}
+    <!-- svelte-ignore a11y_no_static_element_interactions a11y_click_events_have_key_events -->
+    <div use:portal class="order-note-overlay" onclick={() => { if (!purchaseLoading) notePromptOpen = false; }} onkeydown={(e) => { if (e.key === 'Escape' && !purchaseLoading) notePromptOpen = false; }}>
+      <div class="order-note-modal" role="dialog" aria-modal="true" aria-label="Order note" onclick={(e) => e.stopPropagation()}>
+        <h3 class="order-note-title">Anything for the fulfillers?</h3>
+        <p class="order-note-hint">Optional — size, colour, or any special instructions for your {selectedShopItem.name}.</p>
+        <textarea
+          class="order-note-input"
+          maxlength="500"
+          rows="4"
+          bind:value={orderNote}
+          placeholder="e.g. Size L, ship to dorm mailroom"
+        ></textarea>
+        <div class="order-note-count">{orderNote.length}/500</div>
+        {#if purchaseError}
+          <p class="shop-modal-error">{purchaseError}</p>
+        {/if}
+        <div class="order-note-actions">
+          <button type="button" class="order-note-cancel" onclick={() => notePromptOpen = false} disabled={purchaseLoading}>Cancel</button>
+          <button type="button" class="order-note-confirm" onclick={purchaseItem} disabled={purchaseLoading}>
+            {purchaseLoading ? 'Ordering…' : 'Place order'}
+          </button>
         </div>
       </div>
     </div>
@@ -2917,47 +2973,10 @@
                 {#if devlogLookoutSessionsLoading}
                   <span class="lookout-hint">Checking for saved Lookout sessions…</span>
                 {:else if devlogLookoutSessions.length > 0}
-                  <div class="lookout-picker" role="radiogroup" aria-label="Saved Lookout sessions">
-                    <button
-                      type="button"
-                      class="lookout-session-card lookout-session-card-none"
-                      class:active={devlogLookoutSessionId === null}
-                      role="radio"
-                      aria-checked={devlogLookoutSessionId === null}
-                      onclick={() => devlogLookoutSessionId = null}
-                    >
-                      <span class="lookout-session-title">No timelapse</span>
-                      <span class="lookout-session-meta">Post without a Lookout session</span>
-                    </button>
-                    {#each getSelectableDevlogLookoutSessions(devlogLookoutSessions) as session (session.id)}
-                      <button
-                        type="button"
-                        class="lookout-session-card"
-                        class:active={devlogLookoutSessionId === session.id}
-                        role="radio"
-                        aria-checked={devlogLookoutSessionId === session.id}
-                        onclick={() => devlogLookoutSessionId = session.id}
-                      >
-                        {#if session.thumbnailUrl}
-                          <img class="lookout-session-thumb" src={session.thumbnailUrl} alt="Lookout session thumbnail" />
-                        {:else}
-                          <div class="lookout-session-thumb lookout-session-thumb-placeholder" aria-hidden="true">{session.status === 'complete' ? '✓' : '…'}</div>
-                        {/if}
-                        <div class="lookout-session-copy">
-                          <span class="lookout-session-title">{session.status === 'complete' ? 'Complete session' : session.status}</span>
-                          <span class="lookout-session-meta">
-                            {#if session.trackedSeconds}
-                              {fmtTrackedShort(session.trackedSeconds)} ·
-                            {/if}
-                            {session.createdAt ? formatLocal(session.createdAt) : 'recent'}
-                          </span>
-                          {#if session.status === 'complete'}
-                            <span class="lookout-session-meta lookout-session-meta-accent">Ready to attach</span>
-                          {/if}
-                        </div>
-                      </button>
-                    {/each}
-                  </div>
+                  <button type="button" class="lookout-choose-btn" onclick={() => lookoutPickerOpen = true}>
+                    <span>{selectedLookoutLabel()}</span>
+                    <span class="lookout-choose-caret" aria-hidden="true">▾</span>
+                  </button>
                 {/if}
                 {#if devlogLookoutSessionId}
                   <span class="lookout-attached">Recording attached — finish in the Lookout app; it'll appear on this devlog once it's done.</span>
@@ -2966,7 +2985,6 @@
                 {/if}
               </div>
             </div>
-
             {#if devlogError}
               <p class="form-error">{devlogError}</p>
             {/if}
@@ -3320,6 +3338,93 @@
   <div class="devlog-lightbox" onclick={closeDevlogLightbox} role="dialog" aria-modal="true" aria-label="Devlog image">
     <img src={devlogLightbox} alt="Devlog attachment full size" onclick={(e) => e.stopPropagation()} />
     <button type="button" class="devlog-lightbox-close" onclick={closeDevlogLightbox} aria-label="Close">&times;</button>
+  </div>
+{/if}
+
+{#if lookoutPickerOpen}
+  <!-- svelte-ignore a11y_click_events_have_key_events -->
+  <!-- svelte-ignore a11y_no_static_element_interactions -->
+  <!-- svelte-ignore a11y_interactive_supports_focus -->
+  <div class="lookout-modal-backdrop" onclick={() => lookoutPickerOpen = false} role="dialog" aria-modal="true" aria-label="Select a Lookout timelapse">
+    <div class="lookout-modal" onclick={(e) => e.stopPropagation()}>
+      <header class="lookout-modal-header">
+        <h3 class="lookout-modal-title">Select a timelapse</h3>
+        <button type="button" class="lookout-modal-close" onclick={() => lookoutPickerOpen = false} aria-label="Close">&times;</button>
+      </header>
+      <div class="lapse-toolbar">
+        <button
+          type="button"
+          class="lapse-record"
+          disabled={devlogLookoutBusy || !devlogProjectId}
+          onclick={() => { lookoutPickerOpen = false; startDevlogRecording(); }}
+        >
+          {devlogLookoutBusy ? 'Opening Lookout…' : '🎥 Record new timelapse'}
+        </button>
+      </div>
+      {#if devlogLookoutSessionsLoading}
+        <div class="lapse-grid" aria-hidden="true">
+          {#each Array(4) as _, i (i)}
+            <div class="lapse-card lapse-card-skeleton">
+              <div class="lapse-thumb lapse-thumb-skeleton"></div>
+              <div class="lapse-meta">
+                <span class="lapse-skeleton-line"></span>
+                <span class="lapse-skeleton-line short"></span>
+              </div>
+            </div>
+          {/each}
+        </div>
+      {:else}
+        <div class="lapse-grid" role="radiogroup" aria-label="Saved Lookout sessions">
+          <button
+            type="button"
+            class="lapse-card lapse-card-none"
+            class:selected={devlogLookoutSessionId === null}
+            role="radio"
+            aria-checked={devlogLookoutSessionId === null}
+            onclick={() => { devlogLookoutSessionId = null; lookoutPickerOpen = false; }}
+          >
+            <div class="lapse-thumb lapse-thumb-none" aria-hidden="true">∅</div>
+            <div class="lapse-meta">
+              <span class="lapse-name">No timelapse</span>
+              <span class="lapse-sub">Post without a Lookout session</span>
+            </div>
+          </button>
+          {#each getSelectableDevlogLookoutSessions(devlogLookoutSessions) as session (session.id)}
+            <button
+              type="button"
+              class="lapse-card"
+              class:selected={devlogLookoutSessionId === session.id}
+              role="radio"
+              aria-checked={devlogLookoutSessionId === session.id}
+              onclick={() => { devlogLookoutSessionId = session.id; lookoutPickerOpen = false; }}
+            >
+              {#if devlogLookoutSessionId === session.id}
+                <span class="lapse-check" aria-hidden="true">
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3">
+                    <path stroke-linecap="round" stroke-linejoin="round" d="M5 13l4 4L19 7" />
+                  </svg>
+                </span>
+              {/if}
+              {#if session.thumbnailUrl}
+                <div class="lapse-thumb" style="background-image: url({session.thumbnailUrl})"></div>
+              {:else}
+                <div class="lapse-thumb lapse-thumb-empty" aria-hidden="true">{session.status === 'complete' ? '✓' : '…'}</div>
+              {/if}
+              <div class="lapse-meta">
+                <span class="lapse-name">{session.name ?? (session.status === 'complete' ? 'Complete session' : session.status)}</span>
+                <div class="lapse-subrow">
+                  <span class="lapse-sub">{session.trackedSeconds ? fmtTrackedShort(session.trackedSeconds) : '—'}</span>
+                  <span class="lapse-sub">{session.createdAt ? formatLocal(session.createdAt) : 'recent'}</span>
+                </div>
+                {#if session.status !== 'complete'}
+                  <span class="lapse-status">{session.status}</span>
+                {/if}
+              </div>
+            </button>
+          {/each}
+        </div>
+      {/if}
+    </div>
   </div>
 {/if}
 
@@ -4726,69 +4831,211 @@
     flex-direction: column;
     gap: 0.5rem;
   }
-  .lookout-picker {
-    display: grid;
-    grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
-    gap: 0.65rem;
-  }
-  .lookout-session-card {
-    display: grid;
-    grid-template-columns: 52px minmax(0, 1fr);
-    gap: 0.75rem;
+  .lookout-choose-btn {
+    display: flex;
     align-items: center;
-    padding: 0.7rem 0.8rem;
-    border-radius: 12px;
+    justify-content: space-between;
+    gap: 0.5rem;
+    align-self: flex-start;
+    min-width: 240px;
+    padding: 0.55rem 0.9rem;
+    border-radius: 8px;
+    border: 1px solid rgba(255, 255, 255, 0.22);
+    background: rgba(255, 255, 255, 0.05);
+    color: inherit;
+    font: inherit;
+    cursor: pointer;
+    transition: border-color 120ms ease, background 120ms ease;
+  }
+  .lookout-choose-btn:hover {
+    border-color: rgba(255, 255, 255, 0.4);
+    background: rgba(255, 255, 255, 0.09);
+  }
+  .lookout-choose-caret {
+    opacity: 0.7;
+    font-size: 0.8rem;
+  }
+  .lookout-modal-backdrop {
+    position: fixed;
+    inset: 0;
+    z-index: 1000;
+    display: grid;
+    place-items: center;
+    padding: 1.5rem;
+    background: rgba(0, 0, 0, 0.6);
+    backdrop-filter: blur(2px);
+  }
+  .lookout-modal {
+    width: min(680px, 100%);
+    max-height: 80vh;
+    overflow-y: auto;
+    padding: 1.25rem;
+    border-radius: 14px;
     border: 1px solid rgba(255, 255, 255, 0.14);
+    background: #3a3832;
+    box-shadow: 0 20px 60px rgba(0, 0, 0, 0.5);
+  }
+  .lookout-modal-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-bottom: 1rem;
+  }
+  .lookout-modal-title {
+    margin: 0;
+    font-size: 1.05rem;
+    color: #e6e0d2;
+  }
+  .lookout-modal-close {
+    border: none;
+    background: transparent;
+    color: inherit;
+    font-size: 1.6rem;
+    line-height: 1;
+    cursor: pointer;
+    opacity: 0.7;
+  }
+  .lookout-modal-close:hover {
+    opacity: 1;
+  }
+  /* Lapse picker cards (Fallout-style): big 16:9 thumbnail on top, name +
+     duration/date below, dim-unselected with a ring + checkmark on the active. */
+  .lapse-toolbar {
+    display: flex;
+    justify-content: center;
+    margin-bottom: 1.1rem;
+  }
+  .lapse-record {
+    padding: 0.5rem 1.1rem;
+    border-radius: 8px;
+    border: 1px solid rgba(255, 255, 255, 0.25);
+    background: rgba(255, 255, 255, 0.06);
+    color: inherit;
+    font: inherit;
+    font-weight: 700;
+    cursor: pointer;
+    transition: background 120ms ease, border-color 120ms ease;
+  }
+  .lapse-record:hover:not(:disabled) {
+    background: rgba(255, 255, 255, 0.1);
+    border-color: rgba(255, 255, 255, 0.42);
+  }
+  .lapse-record:disabled {
+    opacity: 0.5;
+    cursor: default;
+  }
+  .lapse-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+    gap: 1rem;
+  }
+  .lapse-card {
+    position: relative;
+    display: flex;
+    flex-direction: column;
+    gap: 0.5rem;
+    padding: 0.55rem;
+    border-radius: 12px;
+    border: 1px solid transparent;
     background: rgba(255, 255, 255, 0.05);
     color: inherit;
     text-align: left;
     cursor: pointer;
-    transition: border-color 120ms ease, transform 120ms ease, background 120ms ease;
+    opacity: 0.6;
+    transition: opacity 120ms ease, box-shadow 120ms ease, transform 120ms ease, background 120ms ease;
   }
-  .lookout-session-card:hover {
-    transform: translateY(-1px);
-    border-color: rgba(255, 255, 255, 0.28);
+  .lapse-card:hover {
+    opacity: 0.85;
     background: rgba(255, 255, 255, 0.08);
   }
-  .lookout-session-card.active {
-    border-color: rgba(255, 255, 255, 0.5);
-    background: rgba(255, 255, 255, 0.12);
-    box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.08) inset;
+  .lapse-card.selected {
+    opacity: 1;
+    background: rgba(255, 255, 255, 0.1);
+    box-shadow: 0 0 0 2px #93b4cd;
   }
-  .lookout-session-card-none {
-    grid-template-columns: 1fr;
-    min-height: 84px;
+  .lapse-thumb {
+    aspect-ratio: 16 / 9;
+    width: 100%;
+    border-radius: 8px;
+    background-color: rgba(0, 0, 0, 0.35);
+    background-size: contain;
+    background-position: center;
+    background-repeat: no-repeat;
   }
-  .lookout-session-thumb {
-    width: 52px;
-    height: 52px;
-    border-radius: 10px;
-    object-fit: cover;
-    background: rgba(0, 0, 0, 0.3);
-  }
-  .lookout-session-thumb-placeholder {
+  .lapse-thumb-empty,
+  .lapse-thumb-none {
     display: grid;
     place-items: center;
-    color: rgba(255, 255, 255, 0.8);
-    font-size: 1.15rem;
-    font-weight: 700;
+    font-size: 1.6rem;
+    color: rgba(255, 255, 255, 0.6);
   }
-  .lookout-session-copy {
+  .lapse-meta {
     display: flex;
     flex-direction: column;
-    gap: 0.15rem;
+    gap: 0.2rem;
     min-width: 0;
   }
-  .lookout-session-title {
-    font-size: 0.92rem;
+  .lapse-name {
     font-weight: 700;
+    font-size: 0.92rem;
+    color: #f0ead9;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
   }
-  .lookout-session-meta {
+  .lapse-subrow {
+    display: flex;
+    justify-content: space-between;
+    gap: 0.5rem;
+  }
+  .lapse-sub {
     font-size: 0.78rem;
-    opacity: 0.72;
+    opacity: 0.7;
   }
-  .lookout-session-meta-accent {
-    opacity: 0.9;
+  .lapse-status {
+    font-size: 0.72rem;
+    text-transform: capitalize;
+    opacity: 0.85;
+    color: #d8c79a;
+  }
+  .lapse-check {
+    position: absolute;
+    top: 0.6rem;
+    right: 0.6rem;
+    width: 1.5rem;
+    height: 1.5rem;
+    border-radius: 50%;
+    background: #93b4cd;
+    color: #2a2824;
+    display: grid;
+    place-items: center;
+    z-index: 2;
+  }
+  .lapse-check svg {
+    width: 0.9rem;
+    height: 0.9rem;
+  }
+  /* Skeleton loading state */
+  .lapse-card-skeleton {
+    opacity: 1;
+    cursor: default;
+  }
+  .lapse-thumb-skeleton,
+  .lapse-skeleton-line {
+    background: rgba(255, 255, 255, 0.08);
+    border-radius: 6px;
+    animation: lapse-pulse 1.2s ease-in-out infinite;
+  }
+  .lapse-skeleton-line {
+    height: 0.8rem;
+    width: 80%;
+  }
+  .lapse-skeleton-line.short {
+    width: 50%;
+  }
+  @keyframes lapse-pulse {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.4; }
   }
   .lookout-record-btn {
     align-self: flex-start;
@@ -5526,6 +5773,78 @@
     padding: 28px 28px 24px;
     position: relative;
     color: #4b4840;
+  }
+
+  .order-note-overlay {
+    position: fixed;
+    inset: 0;
+    background: rgba(0, 0, 0, 0.65);
+    z-index: 10000;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 20px;
+  }
+  .order-note-modal {
+    background: #cbc1ae;
+    border: 2px solid #1a1a1a;
+    box-shadow: 6px 6px 0 rgba(0, 0, 0, 0.4);
+    width: 100%;
+    max-width: 440px;
+    padding: 24px;
+    color: #4b4840;
+  }
+  .order-note-title {
+    margin: 0 0 6px;
+    font-size: 20px;
+  }
+  .order-note-hint {
+    margin: 0 0 14px;
+    font-size: 14px;
+    opacity: 0.75;
+  }
+  .order-note-input {
+    width: 100%;
+    box-sizing: border-box;
+    resize: vertical;
+    background: #ded5c3;
+    border: 2px solid #1a1a1a;
+    padding: 10px;
+    font: inherit;
+    color: #4b4840;
+  }
+  .order-note-count {
+    text-align: right;
+    font-size: 12px;
+    opacity: 0.6;
+    margin-top: 4px;
+  }
+  .order-note-actions {
+    display: flex;
+    justify-content: flex-end;
+    gap: 10px;
+    margin-top: 14px;
+  }
+  .order-note-cancel,
+  .order-note-confirm {
+    padding: 8px 18px;
+    border: 2px solid #1a1a1a;
+    font: inherit;
+    font-weight: 700;
+    cursor: pointer;
+  }
+  .order-note-cancel {
+    background: transparent;
+    color: #4b4840;
+  }
+  .order-note-confirm {
+    background: #4b4840;
+    color: #ede6d6;
+  }
+  .order-note-confirm:disabled,
+  .order-note-cancel:disabled {
+    opacity: 0.5;
+    cursor: default;
   }
 
   .suggestions-close {
