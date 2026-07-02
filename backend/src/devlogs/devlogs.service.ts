@@ -7,11 +7,12 @@ import {
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository } from 'typeorm';
+import { DataSource, Repository } from 'typeorm';
 import { Devlog } from '../entities/devlog.entity';
 import { Project } from '../entities/project.entity';
 import { fetchWithTimeout } from '../fetch.util';
 import { AuditLogService } from '../audit-log/audit-log.service';
+import { LookoutService, LookoutSessionDTO } from '../lookout/lookout.service';
 import { CreateDevlogDto } from './create-devlog.dto';
 
 const CDN_UPLOAD_URL = 'https://cdn.hackclub.com/api/v4/upload';
@@ -42,6 +43,8 @@ export class DevlogsService {
   constructor(
     private configService: ConfigService,
     private auditLogService: AuditLogService,
+    private lookoutService: LookoutService,
+    private dataSource: DataSource,
     @InjectRepository(Devlog) private devlogRepo: Repository<Devlog>,
     @InjectRepository(Project) private projectRepo: Repository<Project>,
   ) {
@@ -55,7 +58,8 @@ export class DevlogsService {
   async create(userId: string, dto: CreateDevlogDto) {
     const title = this.requireTitle(dto.title);
     const text = this.requireText(dto.text);
-    const projectId = await this.requireProjectId(dto.projectId, userId);
+    const project = await this.requireProjectId(dto.projectId, userId);
+    const projectId = project.id;
 
     const validated = this.validateImages(dto.images);
     const imageUrls = await this.uploadImages(validated);
@@ -69,10 +73,19 @@ export class DevlogsService {
     });
     const saved = await this.devlogRepo.save(devlog);
 
+    if (dto.lookoutSessionId) {
+      await this.lookoutService.attachToDevlog(
+        dto.lookoutSessionId,
+        userId,
+        projectId,
+        saved.id,
+      );
+    }
+
     await this.auditLogService.log(
       userId,
       'devlog_created',
-      `Created devlog "${title}" (${text.length} chars) on project ${projectId}`,
+      `Created devlog "${title}" (${text.length} chars) on project ${project.name}`,
     );
 
     return this.toPublic(saved);
@@ -83,7 +96,10 @@ export class DevlogsService {
       where: { userId },
       order: { createdAt: 'DESC' },
     });
-    return rows.map((d) => this.toPublic(d));
+    const lookouts = await this.lookoutService.findForDevlogs(
+      rows.map((d) => d.id),
+    );
+    return rows.map((d) => this.toPublic(d, lookouts.get(d.id) ?? null));
   }
 
   // `isSuperAdmin` defaults to false so this fails closed: non-Super-Admin
@@ -95,6 +111,9 @@ export class DevlogsService {
       order: { createdAt: 'ASC' },
       relations: ['user'],
     });
+    const lookouts = await this.lookoutService.findForDevlogs(
+      rows.map((d) => d.id),
+    );
     return rows.map((d) => ({
       id: d.id,
       projectId: d.projectId,
@@ -105,6 +124,9 @@ export class DevlogsService {
       title: d.title,
       text: d.text,
       imageUrls: d.imageUrls ?? [],
+      lookout: lookouts.get(d.id) ?? null,
+      approved: d.approved,
+      approvedHours: d.approvedHours,
       createdAt: d.createdAt,
     }));
   }
@@ -120,6 +142,57 @@ export class DevlogsService {
     return { ok: true };
   }
 
+  async reviewDevlog(
+    devlogId: string,
+    reviewerId: string,
+    dto: { approved: boolean; approvedHours: number | null }) {
+      const devlog = await this.devlogRepo.findOne({ where: { id: devlogId } });
+      if (!devlog) throw new BadRequestException('Devlog not found'); 
+      if (!devlog.projectId) throw new BadRequestException('Devlog is not linked to a project');
+
+      const hours = 
+        dto.approved && typeof dto.approvedHours === 'number' && dto.approvedHours >= 0
+          ? Math.round(Math.min(dto.approvedHours, 1000) * 10) / 10
+          : 0;
+
+      const previous = devlog.approved ? devlog.approvedHours ?? 0 : 0;
+      const delta = Math.round((hours - previous) * 10) / 10;
+
+      return this.dataSource.transaction(async (manager) => {
+        if (delta != 0) {
+          const project = await manager.findOne(Project, { where: { id: devlog.projectId! }, lock: { mode: 'pessimistic_write' } });
+          if (project) {
+            const next = Math.round(((project.overrideHours ?? 0) + delta) * 10) / 10;
+            project.overrideHours = Math.max(0, next);
+            await manager.save(Project, project);
+          }
+        }
+        devlog.approved = dto.approved;
+        devlog.approvedHours = dto.approved ? hours : null;
+        devlog.approvedByReviewerId = reviewerId;
+        devlog.approvedAt = new Date();
+        await manager.save(Devlog, devlog);
+
+        await this.auditLogService.log(
+          reviewerId,
+          'devlog_reviewed',
+          `${dto.approved ? 'Approved' : 'Unapproved'} devlog "${devlog.title}" (${hours}h, Δ${delta}h) on project ${devlog.projectId}`,
+      );
+      return { id: devlog.id, approved: devlog.approved, approvedHours: devlog.approvedHours};
+    });
+  }
+  
+  async approvedHoursForProject(projectId: string): Promise<number> {
+  const { sum } = await this.devlogRepo
+    .createQueryBuilder('d')
+    .select('COALESCE(SUM(d.approved_hours), 0)', 'sum')
+    .where('d.project_id = :projectId', { projectId })
+    .andWhere('d.approved = true')
+    .getRawOne<{ sum: string }>() ?? { sum: '0' };
+  return Math.round(parseFloat(sum) * 10) / 10;
+  } 
+  
+
   /* ---------------------------------------------------------------- */
   /*  Validation helpers                                               */
   /* ---------------------------------------------------------------- */
@@ -130,7 +203,7 @@ export class DevlogsService {
    */
   private sanitize(raw: string): string {
     return String(raw)
-      .replace(/[<>"'`\\]/g, '') // strip injection-relevant chars (keep & for ampersand-using prose)
+      .replace(/[<>"`\\]/g, '') // strip injection-relevant chars (keep & and ' for prose — Svelte escapes on render)
       .replace(/\0/g, '') // strip null bytes
       .replace(/\r\n/g, '\n')
       .trim();
@@ -167,7 +240,7 @@ export class DevlogsService {
   private async requireProjectId(
     projectId: string | null | undefined,
     userId: string,
-  ): Promise<string> {
+  ): Promise<{ id: string; name: string }> {
     if (!projectId || typeof projectId !== 'string') {
       throw new BadRequestException('projectId is required');
     }
@@ -176,10 +249,10 @@ export class DevlogsService {
       throw new BadRequestException('projectId is required');
     }
 
-    // UUID format check
+  // UUID format check
     if (
       !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(
-        trimmed,
+      trimmed,
       )
     ) {
       throw new BadRequestException('projectId is not a valid id');
@@ -187,13 +260,14 @@ export class DevlogsService {
 
     const project = await this.projectRepo.findOne({
       where: { id: trimmed, userId },
-      select: ['id'],
+      select: ['id', 'name'],
     });
     if (!project) {
       throw new BadRequestException('projectId not found or not yours');
     }
-    return project.id;
+    return { id: project.id, name: project.name };
   }
+
 
   private validateImages(
     images: string[] | undefined,
@@ -287,13 +361,14 @@ export class DevlogsService {
     return urls;
   }
 
-  private toPublic(d: Devlog) {
+  private toPublic(d: Devlog, lookout: LookoutSessionDTO | null = null) {
     return {
       id: d.id,
       projectId: d.projectId,
       title: d.title,
       text: d.text,
       imageUrls: d.imageUrls ?? [],
+      lookout,
       createdAt: d.createdAt,
     };
   }

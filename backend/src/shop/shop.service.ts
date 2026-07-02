@@ -218,7 +218,7 @@ export class ShopService {
    * locking on both the user row and the shop item row to prevent race
    * conditions (double-spend, overselling).
    */
-  async purchase(userId: string, shopItemId: string, quantity: number) {
+  async purchase(userId: string, shopItemId: string, quantity: number, note: string | null = null) {
     // Validate quantity upfront
     if (!Number.isInteger(quantity) || quantity < 1) {
       throw new BadRequestException('Quantity must be a positive integer');
@@ -283,6 +283,7 @@ export class ShopService {
         pipesSpent: totalCost,
         itemName: item.name,
         status: 'pending',
+        fulfillmentNotes: note,
       });
       const savedOrder = await manager.save(Order, order);
 

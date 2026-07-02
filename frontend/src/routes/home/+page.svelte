@@ -74,7 +74,7 @@
   let editingProject = $state<any>(null);
   type ProjectReview = {
     id: string;
-    status: 'approved' | 'changes_needed' | 'rejected';
+    status: 'approved' | 'changes_needed';
     feedback: string | null;
     reviewerName: string | null;
     hideReviewerName?: boolean;
@@ -87,79 +87,6 @@
   let projectName = $state('');
   let projectDesc = $state('');
   let projectType = $state('');
-
-  // Common "followed-a-tutorial" beginner projects. When a new project's name or
-  // description matches one of these, we show a soft nudge (not a hard block)
-  // asking the builder to add a unique twist. Phrases are matched loosely
-  // (case-insensitive, punctuation-insensitive, substring) so "Tic-Tac-Toe" and
-  // "tic tac toe game" both hit. Easy to extend — just add a lowercase phrase.
-  const TUTORIAL_BLACKLIST = [
-    'rock paper scissors',
-    'weather app',
-    'to do list',
-    'todo list',
-    'todo app',
-    'tic tac toe',
-    'calculator',
-    'number guessing game',
-    'guess the number',
-    'hangman',
-    'pomodoro',
-    'snake game',
-    'snake',
-    'snake clone',
-    'classic snake',
-    'snakes and ladders',
-    'quiz app',
-    'tip calculator',
-    'bmi calculator',
-    'temperature converter',
-    'unit converter',
-    'currency converter',
-    'currency conversion',
-    'currency exchange',
-    'money converter',
-    'exchange rate app',
-    'exchange rate converter',
-    'age calculator',
-    'digital clock',
-    'countdown timer',
-    'stopwatch',
-    'random quote generator',
-    'quote generator',
-    'dice roller',
-    'coin flip',
-    'magic 8 ball',
-    'color picker',
-    'random color generator',
-    'notes app',
-    'simple chatbot',
-  ];
-
-  // Lowercase and strip every non-alphanumeric char (dashes, spaces, punctuation)
-  // so matching is on likeness rather than an exact string — "Tic-Tac-Toe",
-  // "tic tac toe", and "tictactoe" all collapse to the same thing.
-  function normalizeForBlacklist(s: string): string {
-    return s.toLowerCase().replace(/[^a-z0-9]+/g, '');
-  }
-
-  function matchedTutorialPhrase(name: string, desc: string): string | null {
-    const haystack = normalizeForBlacklist(`${name} ${desc}`);
-    for (const phrase of TUTORIAL_BLACKLIST) {
-      if (haystack.includes(normalizeForBlacklist(phrase))) return phrase;
-    }
-    return null;
-  }
-
-  let showTutorialWarning = $state(false);
-  let tutorialWarningAcknowledged = $state(false);
-
-  function acknowledgeTutorialWarning() {
-    tutorialWarningAcknowledged = true;
-    showTutorialWarning = false;
-    submitProject();
-  }
-
   let codeUrl = $state('');
   let demoUrl = $state('');
   let readmeUrl = $state('');
@@ -215,6 +142,9 @@
   let purchaseLoading = $state(false);
   let purchaseError = $state('');
   let purchaseSuccess = $state('');
+  // Checkout note popup: buyers can leave a note for the fulfillers.
+  let notePromptOpen = $state(false);
+  let orderNote = $state('');
 
   // User's own orders (shown at the bottom of the shop)
   type UserOrderType = { id: string; itemName: string; quantity: number; pipesSpent: number; status: string; createdAt: string };
@@ -230,11 +160,29 @@
   let unreadCount = $state(0);
 
   // Devlogs state
-  type DevlogType = { id: string; projectId: string | null; title: string; text: string; imageUrls: string[]; createdAt: string };
+  type LookoutDevlog = {
+    status: string;
+    trackedSeconds: number | null;
+    videoUrl: string | null;
+    thumbnailUrl: string | null;
+  } | null;
+  type DevlogType = { id: string; projectId: string | null; title: string; text: string; imageUrls: string[]; lookout: LookoutDevlog; createdAt: string };
+  type LookoutSessionOption = {
+    id: string;
+    name: string | null;
+    status: string;
+    trackedSeconds: number | null;
+    screenshotCount: number | null;
+    videoUrl: string | null;
+    thumbnailUrl: string | null;
+    createdAt: string | null;
+  };
   let devlogs = $state<DevlogType[]>([]);
   let devlogsLoading = $state(false);
   let devlogFormOpen = $state(false);
   let devlogLightbox = $state<string | null>(null);
+  // Whether the "select a timelapse" popup is open.
+  let lookoutPickerOpen = $state(false);
 
   // Show the create form upfront when there are no devlogs yet; otherwise
   // keep it tucked behind a "New devlog" button until the user opens it.
@@ -247,7 +195,19 @@
     devlogLightbox = null;
   }
   function onDevlogLightboxKey(e: KeyboardEvent) {
-    if (e.key === 'Escape') closeDevlogLightbox();
+    if (e.key !== 'Escape') return;
+    if (lookoutPickerOpen) { lookoutPickerOpen = false; return; }
+    closeDevlogLightbox();
+  }
+
+  // Label for the "select a timelapse" button reflecting the current choice.
+  function selectedLookoutLabel(): string {
+    if (!devlogLookoutSessionId) return '🎞️ Select a timelapse';
+    const s = devlogLookoutSessions.find((x) => x.id === devlogLookoutSessionId);
+    if (!s) return '🎞️ Select a timelapse';
+    if (s.name) return `${s.name}`;
+    const time = s.trackedSeconds ? `${fmtTrackedShort(s.trackedSeconds)} · ` : '';
+    return `🎞️ ${time}${s.createdAt ? formatLocal(s.createdAt) : 'recent'}`;
   }
   let devlogTitle = $state('');
   let devlogText = $state('');
@@ -256,6 +216,182 @@
   let devlogPreviews = $state<string[]>(['', '', '', '']);
   let devlogSubmitting = $state(false);
   let devlogError = $state('');
+  // Lookout timelapse the user records (optionally) before posting a devlog.
+  let devlogLookoutSessionId = $state<string | null>(null);
+  let devlogLookoutSessions = $state<LookoutSessionOption[]>([]);
+  let devlogLookoutSessionsLoading = $state(false);
+  let devlogLookoutBusy = $state(false);
+  // Survives the redirect to the Lookout recorder so the half-written devlog
+  // (and its attached recording) is restored when the user comes back.
+  const DEVLOG_DRAFT_KEY = 'beest:devlog-lookout-draft';
+  const DEVLOG_AUTOSAVE_KEY = 'beest:devlog-autosave';
+
+  function selectDefaultDevlogLookoutSession(sessions: LookoutSessionOption[]) {
+    const selectable = getSelectableDevlogLookoutSessions(sessions);
+    const completeSession = selectable.find((session) => session.status === 'complete');
+    return completeSession?.id ?? selectable[0]?.id ?? null;
+  }
+
+  function sortDevlogLookoutSessions(sessions: LookoutSessionOption[]) {
+    // Newest to oldest. (Default selection still prefers a complete session via
+    // selectDefaultDevlogLookoutSession, independent of this ordering.)
+    // A missing createdAt means a just-created session, so treat it as newest.
+    return [...sessions].sort((a, b) => {
+      const aTime = a.createdAt ? Date.parse(a.createdAt) : Infinity;
+      const bTime = b.createdAt ? Date.parse(b.createdAt) : Infinity;
+      return bTime - aTime;
+    });
+  }
+
+  $effect(() =>{
+    if (typeof localStorage === 'undefined') return;
+    const hasContent =
+      devlogTitle.trim() || devlogText.trim() || devlogProjectId || devlogLookoutSessionId;
+    if (!hasContent) {
+      localStorage.removeItem(DEVLOG_AUTOSAVE_KEY);
+      return;
+    }
+    localStorage.setItem(
+      DEVLOG_AUTOSAVE_KEY,
+      JSON.stringify({
+        title: devlogTitle,
+        text: devlogText,
+        projectId: devlogProjectId,
+        lookoutSessionId: devlogLookoutSessionId,
+      }),
+    );
+  });
+
+  const LOOKOUT_INPROGRESS_WINDOW_MS = 30 * 60 * 1000;
+  function getSelectableDevlogLookoutSessions(sessions: LookoutSessionOption[]) {
+    const now = Date.now();
+    return sortDevlogLookoutSessions(sessions).filter((session) => {
+      if (session.status === 'failed') return false;
+      if (session.status === 'complete') return true;
+      const created = session.createdAt ? Date.parse(session.createdAt) : now;
+      return now - created < LOOKOUT_INPROGRESS_WINDOW_MS;
+    });
+  }
+
+  async function fetchDevlogLookoutSessions(projectId: string) {
+    if (!projectId) {
+      devlogLookoutSessions = [];
+      devlogLookoutSessionId = null;
+      devlogLookoutSessionsLoading = false;
+      return;
+    }
+
+    devlogLookoutSessionsLoading = true;
+    try {
+      const res = await fetch(`/api/projects/${projectId}/lookout`);
+      if (!res.ok) {
+        devlogLookoutSessions = [];
+        devlogLookoutSessionId = null;
+        return;
+      }
+
+      const data = await res.json().catch(() => null);
+      const sessions = Array.isArray(data?.sessions) ? data.sessions : [];
+      devlogLookoutSessions = sessions;
+
+      if (!sessions.some((session: LookoutSessionOption) => session.id === devlogLookoutSessionId && session.status !== 'failed')) {
+        devlogLookoutSessionId = selectDefaultDevlogLookoutSession(sessions);
+      }
+    } catch {
+      devlogLookoutSessions = [];
+      devlogLookoutSessionId = null;
+    } finally {
+      devlogLookoutSessionsLoading = false;
+    }
+  }
+
+  $effect(() => {
+    const projectId = devlogProjectId.trim();
+    void fetchDevlogLookoutSessions(projectId);
+  });
+
+  async function startDevlogRecording() {
+    if (!devlogProjectId) {
+      devlogError = 'Pick a project before recording a timelapse';
+      return;
+    }
+    devlogLookoutBusy = true;
+    try {
+      const res = await fetch(`/api/projects/${devlogProjectId}/lookout/session`, {
+        method: 'POST'
+      });
+      if (!res.ok) {
+        devlogError = 'Could not start a timelapse recording right now.';
+        return;
+      }
+      const { id, token } = await res.json();
+      devlogLookoutSessionId = id;
+      if (!devlogLookoutSessions.some((session) => session.id === id)) {
+        devlogLookoutSessions = [
+          ...devlogLookoutSessions,
+          { id, name: null, status: 'pending', trackedSeconds: null, screenshotCount: null, videoUrl: null, thumbnailUrl: null, createdAt: null },
+        ];
+      }
+      // Stash the in-progress devlog so it (and this recording) survive the
+      // round-trip in case the browser navigates away to hand off the link.
+      try {
+        sessionStorage.setItem(
+          DEVLOG_DRAFT_KEY,
+          JSON.stringify({
+            title: devlogTitle,
+            text: devlogText,
+            projectId: devlogProjectId,
+            lookoutSessionId: id
+          })
+        );
+      } catch { /* private mode / quota — continue anyway */ }
+      // Deep-link into the Lookout desktop app (matches fallout's desktop mode).
+      window.location.href = `lookout://session?token=${token}`;
+    } catch {
+      devlogError = 'Could not start a timelapse recording right now.';
+    } finally {
+      devlogLookoutBusy = false;
+    }
+  }
+
+  function restoreDevlogDraft() {
+    let raw: string | null = null;
+    try {
+      raw = sessionStorage.getItem(DEVLOG_DRAFT_KEY);
+      sessionStorage.removeItem(DEVLOG_DRAFT_KEY);
+    } catch { return; }
+    if (!raw) return;
+    try {
+      const draft = JSON.parse(raw);
+      devlogTitle = draft.title ?? '';
+      devlogText = draft.text ?? '';
+      devlogProjectId = draft.projectId ?? '';
+      devlogLookoutSessionId = draft.lookoutSessionId ?? null;
+      devlogFormOpen = true;
+      activeSection = 'devlogs';
+      fetchDevlogs();
+      return true;
+    } catch { /* malformed draft — ignore */ }
+    return false;
+  }
+
+  // Restore a locally autosaved draft (survives reload / window close). The
+  // Lookout sessionStorage draft above takes precedence when both exist.
+  function restoreDevlogAutosave() {
+    let raw: string | null = null;
+    try {
+      raw = localStorage.getItem(DEVLOG_AUTOSAVE_KEY);
+    } catch { return; }
+    if (!raw) return;
+    try {
+      const draft = JSON.parse(raw);
+      devlogTitle = draft.title ?? '';
+      devlogText = draft.text ?? '';
+      devlogProjectId = draft.projectId ?? '';
+      devlogLookoutSessionId = draft.lookoutSessionId ?? null;
+      if (devlogTitle || devlogText || devlogProjectId) devlogFormOpen = true;
+    } catch { /* malformed draft — ignore */ }
+  }
   const DEVLOG_TITLE_MAX = 120;
   const DEVLOG_TEXT_MAX = 5000;
   const DEVLOG_MAX_IMAGES = 4;
@@ -361,7 +497,7 @@
   let resubmitLoading = $state(false);
 
   // Shipping eligibility
-  let shippingCheck = $state<{ hasAddress: boolean; hasBirthdate: boolean; identityVerified: boolean; identityEligible: boolean; identityStatus: 'eligible' | 'ineligible' | 'unverified'; eligible: boolean; addressPortalUrl: string; identityPortalUrl: string } | null>(null);
+  let shippingCheck = $state<{ hasAddress: boolean; hasBirthdate: boolean; identityVerified: boolean; eligible: boolean; addressPortalUrl: string; identityPortalUrl: string } | null>(null);
   let shippingCheckLoading = $state(false);
   let showShippingPrompt = $state(false);
   let identityPollAttempts = $state(0);
@@ -394,8 +530,6 @@
     aiUseDescription = '';
     keystrokes = 0;
     formError = '';
-    showTutorialWarning = false;
-    tutorialWarningAcknowledged = false;
     checkOpenSource = false;
     checkDemoable = false;
     checkReadme = false;
@@ -736,17 +870,15 @@
     hackatimeLoading = false;
   }
 
+  function fmtTrackedShort(secs: number | null): string {
+    if (!secs || secs <= 0) return '';
+    const h = Math.floor(secs / 3600);
+    const m = Math.floor((secs % 3600) / 60);
+    return h > 0 ? `${h}h ${m}m` : `${m}m`;
+  }
+
   async function submitProject() {
     if (!canSubmit) return;
-
-    // Soft nudge when a project (new OR renamed) looks like a basic tutorial
-    // clone. Firing on edit too closes the obvious bypass of creating with a
-    // clean name then renaming to a blacklisted one. Shown once per open form.
-    if (!tutorialWarningAcknowledged && matchedTutorialPhrase(projectName, projectDesc)) {
-      showTutorialWarning = true;
-      return;
-    }
-
     formError = '';
     submitting = true;
 
@@ -1219,6 +1351,14 @@
     } catch { /* silent */ }
   }
 
+  // "Redeem" opens the note popup; the popup's confirm button does the purchase.
+  function openNotePrompt() {
+    if (!selectedShopItem || purchaseLoading) return;
+    purchaseError = '';
+    orderNote = '';
+    notePromptOpen = true;
+  }
+
   async function purchaseItem() {
     if (!selectedShopItem || purchaseLoading) return;
     purchaseError = '';
@@ -1228,12 +1368,17 @@
       const res = await fetch('/api/shop/purchase', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ shopItemId: selectedShopItem.id, quantity: shopQuantity })
+        body: JSON.stringify({
+          shopItemId: selectedShopItem.id,
+          quantity: shopQuantity,
+          note: orderNote.trim() || null
+        })
       });
       const data = await res.json();
       if (!res.ok) {
         purchaseError = data.message || 'Purchase failed';
       } else {
+        notePromptOpen = false;
         purchaseSuccess = `Ordered ${shopQuantity}x ${selectedShopItem.name}!`;
         userPipes = data.remainingPipes;
         // Refresh shop items (stock may have changed)
@@ -1242,7 +1387,7 @@
         fetchUserOrders();
         // Refresh unread count
         fetchUnreadCount();
-        setTimeout(() => { closeShopItem(); purchaseSuccess = ''; }, 2000);
+        setTimeout(() => { closeShopItem(); purchaseSuccess = ''; orderNote = ''; }, 2000);
       }
     } catch {
       purchaseError = 'Network error — try again';
@@ -1340,6 +1485,8 @@
     devlogFiles = [null, null, null, null];
     devlogPreviews = ['', '', '', ''];
     devlogError = '';
+    devlogLookoutSessionId = null;
+    devlogLookoutSessions = [];
   }
 
   async function submitDevlog() {
@@ -1373,6 +1520,7 @@
           text: trimmed,
           projectId: devlogProjectId,
           images,
+          lookoutSessionId: devlogLookoutSessionId ?? undefined,
         }),
       });
       const data = await res.json().catch(() => null);
@@ -1487,6 +1635,9 @@
     fetchPipes();
     fetchUnreadCount();
     loadSectionData(activeSection);
+    // Returning from the Lookout recorder? Re-open the devlog draft we stashed.
+    // Otherwise fall back to the locally autosaved draft (reload / window close).
+    if (!restoreDevlogDraft()) restoreDevlogAutosave();
     updateEventCountdown();
     const countdownTimer = window.setInterval(updateEventCountdown, 1000);
 
@@ -1529,7 +1680,7 @@
           {/each}
           {#if data.role === 'Super Admin'}
             <li><a href="/admin" class="nav-btn nav-link">Admin</a></li>
-          {:else if data.role === 'Reviewer' || data.role === 'Fraud Reviewer' || data.role === 'Fulfiller'}
+          {:else if data.role === 'Reviewer' || data.role === 'Fraud Reviewer'}
             <li><a href="/admin" class="nav-btn nav-link">Review</a></li>
           {/if}
         </ul>
@@ -1584,7 +1735,7 @@
             {#each editingProjectReviews as review}
               <div class="review-feedback-card review-feedback-{review.status}">
                 <div class="review-feedback-header">
-                  <span class="review-feedback-badge {review.status}">{review.status === 'changes_needed' ? 'Changes Needed' : review.status === 'rejected' ? 'Rejected' : 'Approved'}</span>
+                  <span class="review-feedback-badge {review.status}">{review.status === 'changes_needed' ? 'Changes Needed' : 'Approved'}</span>
                   {#if review.hideReviewerName}
                     <span class="review-feedback-reviewer">by a reviewer</span>
                   {:else if review.reviewerName}
@@ -1676,7 +1827,7 @@
           {#each editingProjectReviews as review}
             <div class="review-feedback-card review-feedback-{review.status}">
               <div class="review-feedback-header">
-                <span class="review-feedback-badge {review.status}">{review.status === 'changes_needed' ? 'Changes Needed' : review.status === 'rejected' ? 'Rejected' : 'Approved'}</span>
+                <span class="review-feedback-badge {review.status}">{review.status === 'changes_needed' ? 'Changes Needed' : 'Approved'}</span>
                 {#if review.hideReviewerName}
                   <span class="review-feedback-reviewer">by a reviewer</span>
                 {:else if review.reviewerName}
@@ -1891,21 +2042,15 @@
           <div class="in-review-notice">
             <p class="in-review-text">This project has been reviewed and is awaiting fraud checks. You'll be notified once the fraud team finishes their review.</p>
           </div>
-        {:else if editingProject?.status === 'rejected'}
-          <div class="in-review-notice in-review-notice--rejected">
-            <p class="in-review-text">This project was rejected and can't be resubmitted. You're welcome to build and ship a different project.</p>
-          </div>
         {/if}
         <div class="form-actions">
-          {#if editingProject && editingProject.status !== 'approved' && editingProject.status !== 'rejected'}
+          {#if editingProject && editingProject.status !== 'approved'}
             <button class="form-btn-delete" onclick={() => deleteProject(editingProject.id)}>Delete</button>
           {/if}
-          {#if editingProject?.status !== 'rejected'}
-            <button class="form-btn-submit" disabled={!canSubmit || editingProject?.status === 'unreviewed'} onclick={submitProject}>
-              {#if submitting}{editingProject ? 'Saving...' : 'Creating...'}{:else}{editingProject ? 'Save Changes' : 'Create Project'}{/if}
-            </button>
-          {/if}
-          {#if editingProject && editingProject.status !== 'unreviewed' && editingProject.status !== 'rejected'}
+          <button class="form-btn-submit" disabled={!canSubmit || editingProject?.status === 'unreviewed'} onclick={submitProject}>
+            {#if submitting}{editingProject ? 'Saving...' : 'Creating...'}{:else}{editingProject ? 'Save Changes' : 'Create Project'}{/if}
+          </button>
+          {#if editingProject && editingProject.status !== 'unreviewed'}
               <div class="submit-review-wrap">
                 <button
                   class="form-btn-review"
@@ -1986,20 +2131,15 @@
         <h2 class="section-title">Complete Your Profile</h2>
         <p class="shipping-prompt-text">Before submitting for review, we need a few things from your Hack Club Auth profile — we use these to verify you and to ship prizes when your project is approved:</p>
         <div class="shipping-prompt-items">
-          {#if shippingCheck.identityStatus === 'unverified'}
+          {#if !shippingCheck.identityVerified}
             <div class="shipping-prompt-item missing">
               <span class="shipping-icon">&#x2717;</span>
               <span>Identity not verified</span>
             </div>
-          {:else if shippingCheck.identityStatus === 'ineligible'}
-            <div class="shipping-prompt-item missing">
-              <span class="shipping-icon">&#x2717;</span>
-              <span>Identity verified, but not eligible for YSWS rewards</span>
-            </div>
           {:else}
             <div class="shipping-prompt-item done">
               <span class="shipping-icon">&#x2713;</span>
-              <span>Identity verified &amp; eligible</span>
+              <span>Identity verified</span>
             </div>
           {/if}
           {#if !shippingCheck.hasAddress}
@@ -2025,7 +2165,7 @@
             </div>
           {/if}
         </div>
-        {#if shippingCheck.identityStatus === 'unverified'}
+        {#if !shippingCheck.identityVerified}
           <a class="action-btn shipping-portal-btn" href={shippingCheck.identityPortalUrl} target="_blank" rel="noopener noreferrer">
             Verify your identity
           </a>
@@ -2037,8 +2177,6 @@
             </button>
             <p class="shipping-prompt-poll">We stopped checking automatically. Tap above once HQ approves your document.</p>
           {/if}
-        {:else if shippingCheck.identityStatus === 'ineligible'}
-          <p class="shipping-prompt-poll">Your Hack Club identity is verified, but it's marked not eligible for YSWS rewards — usually an age or region restriction. You can keep building, but this project can't be shipped for review. If you think this is a mistake, reach out to Hack Club.</p>
         {:else if shippingCheck.eligible}
           <p class="shipping-prompt-poll shipping-prompt-success">Identity verified! Click Submit again to ship.</p>
         {/if}
@@ -2076,7 +2214,7 @@
           </label>
           <label class="review-check">
             <input type="checkbox" bind:checked={checkStartedOrUpdated} />
-            <span>I started this project later than April 2nd, 2026, or shipped a significant update to an old project</span>
+            <span>I started this project later than August 2nd, 2026, or shipped a significant update to an old project</span>
           </label>
         </div>
 
@@ -2189,7 +2327,7 @@
                   <div class="project-header-row">
                     <h3 class="project-name">{project.name}</h3>
                     <span class="project-type-badge">{project.projectType}</span>
-                    <span class="project-status-badge {project.status === 'fraud_pending' ? 'unreviewed' : project.status}">{project.status === 'changes_needed' ? 'Changes Needed' : project.status === 'fraud_pending' ? 'In Review' : project.status === 'rejected' ? 'Rejected' : project.status}</span>
+                    <span class="project-status-badge {project.status === 'fraud_pending' ? 'unreviewed' : project.status}">{project.status === 'changes_needed' ? 'Changes Needed' : project.status === 'fraud_pending' ? 'In Review' : project.status}</span>
                   </div>
                   <p class="project-desc">{project.description}</p>
                   <div class="project-links">
@@ -2461,7 +2599,7 @@
             {#if purchaseSuccess}
               <div class="shop-modal-success">{purchaseSuccess}</div>
             {:else if userPipes >= selectedShopItem.priceHours * shopQuantity}
-              <button class="shop-modal-buy" type="button" onclick={purchaseItem} disabled={purchaseLoading}>
+              <button class="shop-modal-buy" type="button" onclick={openNotePrompt} disabled={purchaseLoading}>
                 <span class="buy-text">{purchaseLoading ? 'Ordering...' : 'Redeem'}</span>
               </button>
               {#if purchaseError}
@@ -2474,6 +2612,34 @@
               </div>
             {/if}
           </div>
+        </div>
+      </div>
+    </div>
+    {/if}
+
+    <!-- Order note popup: ask the buyer for a note to the fulfillers -->
+    {#if notePromptOpen && selectedShopItem}
+    <!-- svelte-ignore a11y_no_static_element_interactions a11y_click_events_have_key_events -->
+    <div use:portal class="order-note-overlay" onclick={() => { if (!purchaseLoading) notePromptOpen = false; }} onkeydown={(e) => { if (e.key === 'Escape' && !purchaseLoading) notePromptOpen = false; }}>
+      <div class="order-note-modal" role="dialog" aria-modal="true" aria-label="Order note" onclick={(e) => e.stopPropagation()}>
+        <h3 class="order-note-title">Anything for the fulfillers?</h3>
+        <p class="order-note-hint">Optional — size, colour, or any special instructions for your {selectedShopItem.name}.</p>
+        <textarea
+          class="order-note-input"
+          maxlength="500"
+          rows="4"
+          bind:value={orderNote}
+          placeholder="e.g. Size L, ship to dorm mailroom"
+        ></textarea>
+        <div class="order-note-count">{orderNote.length}/500</div>
+        {#if purchaseError}
+          <p class="shop-modal-error">{purchaseError}</p>
+        {/if}
+        <div class="order-note-actions">
+          <button type="button" class="order-note-cancel" onclick={() => notePromptOpen = false} disabled={purchaseLoading}>Cancel</button>
+          <button type="button" class="order-note-confirm" onclick={purchaseItem} disabled={purchaseLoading}>
+            {purchaseLoading ? 'Ordering…' : 'Place order'}
+          </button>
         </div>
       </div>
     </div>
@@ -2578,16 +2744,6 @@
           </div>
           {#if intentError}<p class="intent-error">{intentError}</p>{/if}
         {/if}
-      </div>
-    </div>
-    {/if}
-
-    {#if showTutorialWarning}
-    <div use:portal class="tutorial-warning-overlay" role="dialog" aria-modal="true" aria-label="Tutorial project notice">
-      <div class="tutorial-warning-modal">
-        <h2 class="tutorial-warning-title">One quick thing</h2>
-        <p class="tutorial-warning-text">Beest is a space for creatives, tutorials are valuable but if you are creating a basic tutoral please add a unique feature, twist or detail, otherwise it may not be accepted.</p>
-        <button class="tutorial-warning-ok" onclick={acknowledgeTutorialWarning}>OK</button>
       </div>
     </div>
     {/if}
@@ -2810,6 +2966,32 @@
               </div>
             </div>
 
+            <div class="devlog-field">
+              <span class="form-label">Timelapse (Lookout) <span class="optional">optional</span></span>
+              <div class="lookout-block">
+                <button
+                  type="button"
+                  class="lookout-record-btn"
+                  disabled={devlogLookoutBusy || !devlogProjectId}
+                  onclick={startDevlogRecording}
+                >
+                  {devlogLookoutBusy ? 'Opening Lookout…' : '🎥 Record a timelapse'}
+                </button>
+                {#if devlogLookoutSessionsLoading}
+                  <span class="lookout-hint">Checking for saved Lookout sessions…</span>
+                {:else if devlogLookoutSessions.length > 0}
+                  <button type="button" class="lookout-choose-btn" onclick={() => lookoutPickerOpen = true}>
+                    <span>{selectedLookoutLabel()}</span>
+                    <span class="lookout-choose-caret" aria-hidden="true">▾</span>
+                  </button>
+                {/if}
+                {#if devlogLookoutSessionId}
+                  <span class="lookout-attached">Recording attached — finish in the Lookout app; it'll appear on this devlog once it's done.</span>
+                {:else}
+                  <span class="lookout-hint">Opens the Lookout desktop app to record. <a href="https://lookout.hackclub.com" target="_blank" rel="noopener">Don't have it?</a></span>
+                {/if}
+              </div>
+            </div>
             {#if devlogError}
               <p class="form-error">{devlogError}</p>
             {/if}
@@ -2869,6 +3051,29 @@
                         <img src={url} alt="Devlog attachment" loading="lazy" />
                       </button>
                     {/each}
+                  </div>
+                {/if}
+                {#if dl.lookout}
+                  <div class="devlog-card-lookout">
+                    {#if dl.lookout.status === 'complete' && dl.lookout.videoUrl}
+                      <details class="lookout-dropdown">
+                        <summary class="lookout-summary">
+                        <span class="lookout-status">{dl.lookout.status}</span>
+                          {#if dl.lookout.trackedSeconds}
+                            <span class="lookout-tracked"> · {fmtTrackedShort(dl.lookout.trackedSeconds)}</span>
+                          {/if}
+                          <span class="lookout-summary-action">See Timelapse</span>
+                        </summary>
+                        <video controls preload="metadata" poster={dl.lookout.thumbnailUrl ?? undefined} src={dl.lookout.videoUrl}>
+                          <track kind="captions" />
+                        </video>
+                      </details>
+                    {:else}
+                      <span class="lookout-status">{dl.lookout.status}</span>
+                      {#if dl.lookout.trackedSeconds}
+                        <span class="lookout-tracked"> · {fmtTrackedShort(dl.lookout.trackedSeconds)}</span>
+                      {/if}
+                    {/if}
                   </div>
                 {/if}
               </article>
@@ -3140,6 +3345,93 @@
   <div class="devlog-lightbox" onclick={closeDevlogLightbox} role="dialog" aria-modal="true" aria-label="Devlog image">
     <img src={devlogLightbox} alt="Devlog attachment full size" onclick={(e) => e.stopPropagation()} />
     <button type="button" class="devlog-lightbox-close" onclick={closeDevlogLightbox} aria-label="Close">&times;</button>
+  </div>
+{/if}
+
+{#if lookoutPickerOpen}
+  <!-- svelte-ignore a11y_click_events_have_key_events -->
+  <!-- svelte-ignore a11y_no_static_element_interactions -->
+  <!-- svelte-ignore a11y_interactive_supports_focus -->
+  <div class="lookout-modal-backdrop" onclick={() => lookoutPickerOpen = false} role="dialog" aria-modal="true" aria-label="Select a Lookout timelapse">
+    <div class="lookout-modal" onclick={(e) => e.stopPropagation()}>
+      <header class="lookout-modal-header">
+        <h3 class="lookout-modal-title">Select a timelapse</h3>
+        <button type="button" class="lookout-modal-close" onclick={() => lookoutPickerOpen = false} aria-label="Close">&times;</button>
+      </header>
+      <div class="lapse-toolbar">
+        <button
+          type="button"
+          class="lapse-record"
+          disabled={devlogLookoutBusy || !devlogProjectId}
+          onclick={() => { lookoutPickerOpen = false; startDevlogRecording(); }}
+        >
+          {devlogLookoutBusy ? 'Opening Lookout…' : '🎥 Record new timelapse'}
+        </button>
+      </div>
+      {#if devlogLookoutSessionsLoading}
+        <div class="lapse-grid" aria-hidden="true">
+          {#each Array(4) as _, i (i)}
+            <div class="lapse-card lapse-card-skeleton">
+              <div class="lapse-thumb lapse-thumb-skeleton"></div>
+              <div class="lapse-meta">
+                <span class="lapse-skeleton-line"></span>
+                <span class="lapse-skeleton-line short"></span>
+              </div>
+            </div>
+          {/each}
+        </div>
+      {:else}
+        <div class="lapse-grid" role="radiogroup" aria-label="Saved Lookout sessions">
+          <button
+            type="button"
+            class="lapse-card lapse-card-none"
+            class:selected={devlogLookoutSessionId === null}
+            role="radio"
+            aria-checked={devlogLookoutSessionId === null}
+            onclick={() => { devlogLookoutSessionId = null; lookoutPickerOpen = false; }}
+          >
+            <div class="lapse-thumb lapse-thumb-none" aria-hidden="true">∅</div>
+            <div class="lapse-meta">
+              <span class="lapse-name">No timelapse</span>
+              <span class="lapse-sub">Post without a Lookout session</span>
+            </div>
+          </button>
+          {#each getSelectableDevlogLookoutSessions(devlogLookoutSessions) as session (session.id)}
+            <button
+              type="button"
+              class="lapse-card"
+              class:selected={devlogLookoutSessionId === session.id}
+              role="radio"
+              aria-checked={devlogLookoutSessionId === session.id}
+              onclick={() => { devlogLookoutSessionId = session.id; lookoutPickerOpen = false; }}
+            >
+              {#if devlogLookoutSessionId === session.id}
+                <span class="lapse-check" aria-hidden="true">
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3">
+                    <path stroke-linecap="round" stroke-linejoin="round" d="M5 13l4 4L19 7" />
+                  </svg>
+                </span>
+              {/if}
+              {#if session.thumbnailUrl}
+                <div class="lapse-thumb" style="background-image: url({session.thumbnailUrl})"></div>
+              {:else}
+                <div class="lapse-thumb lapse-thumb-empty" aria-hidden="true">{session.status === 'complete' ? '✓' : '…'}</div>
+              {/if}
+              <div class="lapse-meta">
+                <span class="lapse-name">{session.name ?? (session.status === 'complete' ? 'Complete session' : session.status)}</span>
+                <div class="lapse-subrow">
+                  <span class="lapse-sub">{session.trackedSeconds ? fmtTrackedShort(session.trackedSeconds) : '—'}</span>
+                  <span class="lapse-sub">{session.createdAt ? formatLocal(session.createdAt) : 'recent'}</span>
+                </div>
+                {#if session.status !== 'complete'}
+                  <span class="lapse-status">{session.status}</span>
+                {/if}
+              </div>
+            </button>
+          {/each}
+        </div>
+      {/if}
+    </div>
   </div>
 {/if}
 
@@ -4208,11 +4500,6 @@
     margin-bottom: 8px;
   }
 
-  .in-review-notice--rejected {
-    background: rgba(179, 74, 74, 0.15);
-    border-color: #b34a4a;
-  }
-
   .in-review-text {
     margin: 0;
     font-family: "Courier New", monospace;
@@ -4544,6 +4831,295 @@
 
   .hackatime-group {
     position: relative;
+  }
+
+  .lookout-block {
+    display: flex;
+    flex-direction: column;
+    gap: 0.5rem;
+  }
+  .lookout-choose-btn {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 0.5rem;
+    align-self: flex-start;
+    min-width: 240px;
+    padding: 0.55rem 0.9rem;
+    border-radius: 8px;
+    border: 1px solid rgba(255, 255, 255, 0.22);
+    background: rgba(255, 255, 255, 0.05);
+    color: inherit;
+    font: inherit;
+    cursor: pointer;
+    transition: border-color 120ms ease, background 120ms ease;
+  }
+  .lookout-choose-btn:hover {
+    border-color: rgba(255, 255, 255, 0.4);
+    background: rgba(255, 255, 255, 0.09);
+  }
+  .lookout-choose-caret {
+    opacity: 0.7;
+    font-size: 0.8rem;
+  }
+  .lookout-modal-backdrop {
+    position: fixed;
+    inset: 0;
+    z-index: 1000;
+    display: grid;
+    place-items: center;
+    padding: 1.5rem;
+    background: rgba(0, 0, 0, 0.6);
+    backdrop-filter: blur(2px);
+  }
+  .lookout-modal {
+    width: min(680px, 100%);
+    max-height: 80vh;
+    overflow-y: auto;
+    padding: 1.25rem;
+    border-radius: 14px;
+    border: 1px solid rgba(255, 255, 255, 0.14);
+    background: #3a3832;
+    box-shadow: 0 20px 60px rgba(0, 0, 0, 0.5);
+  }
+  .lookout-modal-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-bottom: 1rem;
+  }
+  .lookout-modal-title {
+    margin: 0;
+    font-size: 1.05rem;
+    color: #e6e0d2;
+  }
+  .lookout-modal-close {
+    border: none;
+    background: transparent;
+    color: inherit;
+    font-size: 1.6rem;
+    line-height: 1;
+    cursor: pointer;
+    opacity: 0.7;
+  }
+  .lookout-modal-close:hover {
+    opacity: 1;
+  }
+  /* Lapse picker cards (Fallout-style): big 16:9 thumbnail on top, name +
+     duration/date below, dim-unselected with a ring + checkmark on the active. */
+  .lapse-toolbar {
+    display: flex;
+    justify-content: center;
+    margin-bottom: 1.1rem;
+  }
+  .lapse-record {
+    padding: 0.5rem 1.1rem;
+    border-radius: 8px;
+    border: 1px solid rgba(255, 255, 255, 0.25);
+    background: rgba(255, 255, 255, 0.06);
+    color: inherit;
+    font: inherit;
+    font-weight: 700;
+    cursor: pointer;
+    transition: background 120ms ease, border-color 120ms ease;
+  }
+  .lapse-record:hover:not(:disabled) {
+    background: rgba(255, 255, 255, 0.1);
+    border-color: rgba(255, 255, 255, 0.42);
+  }
+  .lapse-record:disabled {
+    opacity: 0.5;
+    cursor: default;
+  }
+  .lapse-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+    gap: 1rem;
+  }
+  .lapse-card {
+    position: relative;
+    display: flex;
+    flex-direction: column;
+    gap: 0.5rem;
+    padding: 0.55rem;
+    border-radius: 12px;
+    border: 1px solid transparent;
+    background: rgba(255, 255, 255, 0.05);
+    color: inherit;
+    text-align: left;
+    cursor: pointer;
+    opacity: 0.6;
+    transition: opacity 120ms ease, box-shadow 120ms ease, transform 120ms ease, background 120ms ease;
+  }
+  .lapse-card:hover {
+    opacity: 0.85;
+    background: rgba(255, 255, 255, 0.08);
+  }
+  .lapse-card.selected {
+    opacity: 1;
+    background: rgba(255, 255, 255, 0.1);
+    box-shadow: 0 0 0 2px #93b4cd;
+  }
+  .lapse-thumb {
+    aspect-ratio: 16 / 9;
+    width: 100%;
+    border-radius: 8px;
+    background-color: rgba(0, 0, 0, 0.35);
+    background-size: contain;
+    background-position: center;
+    background-repeat: no-repeat;
+  }
+  .lapse-thumb-empty,
+  .lapse-thumb-none {
+    display: grid;
+    place-items: center;
+    font-size: 1.6rem;
+    color: rgba(255, 255, 255, 0.6);
+  }
+  .lapse-meta {
+    display: flex;
+    flex-direction: column;
+    gap: 0.2rem;
+    min-width: 0;
+  }
+  .lapse-name {
+    font-weight: 700;
+    font-size: 0.92rem;
+    color: #f0ead9;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  .lapse-subrow {
+    display: flex;
+    justify-content: space-between;
+    gap: 0.5rem;
+  }
+  .lapse-sub {
+    font-size: 0.78rem;
+    opacity: 0.7;
+  }
+  .lapse-status {
+    font-size: 0.72rem;
+    text-transform: capitalize;
+    opacity: 0.85;
+    color: #d8c79a;
+  }
+  .lapse-check {
+    position: absolute;
+    top: 0.6rem;
+    right: 0.6rem;
+    width: 1.5rem;
+    height: 1.5rem;
+    border-radius: 50%;
+    background: #93b4cd;
+    color: #2a2824;
+    display: grid;
+    place-items: center;
+    z-index: 2;
+  }
+  .lapse-check svg {
+    width: 0.9rem;
+    height: 0.9rem;
+  }
+  /* Skeleton loading state */
+  .lapse-card-skeleton {
+    opacity: 1;
+    cursor: default;
+  }
+  .lapse-thumb-skeleton,
+  .lapse-skeleton-line {
+    background: rgba(255, 255, 255, 0.08);
+    border-radius: 6px;
+    animation: lapse-pulse 1.2s ease-in-out infinite;
+  }
+  .lapse-skeleton-line {
+    height: 0.8rem;
+    width: 80%;
+  }
+  .lapse-skeleton-line.short {
+    width: 50%;
+  }
+  @keyframes lapse-pulse {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.4; }
+  }
+  .lookout-record-btn {
+    align-self: flex-start;
+    padding: 0.5rem 0.9rem;
+    border-radius: 6px;
+    border: 1px solid currentColor;
+    background: transparent;
+    color: inherit;
+    cursor: pointer;
+    font: inherit;
+  }
+  .lookout-record-btn:disabled {
+    opacity: 0.6;
+    cursor: default;
+  }
+  .lookout-attached,
+  .lookout-hint {
+    font-size: 0.8rem;
+    opacity: 0.7;
+  }
+
+  .lookout-dropdown summary{
+    cursor:pointer;
+    list-style: none;
+    display: flex;
+    align-items: center;
+    gap: 0.4rem;
+    user-select:none;
+  }
+
+  .lookout-dropdown-summary::-webkit-details-marker {
+    display: none;
+  }
+
+  .lookout-summary-action{
+    margin-left: auto;
+    font-size: 0.8rem;
+    opacity: 0.7;
+  }
+
+  .lookout-summary-action::before {
+    content: '▸ ';
+  }
+  .lookout-dropdown[open] .lookout-summary-action::before {
+    content: '▾ ';
+  }
+  .lookout-dropdown[open] .lookout-summary-action::after {
+    content: ' (hide)';
+  }
+  .lookout-dropdown video {
+    margin-top: 0.5rem;
+  }
+
+  .optional {
+    font-weight: 400;
+    font-size: 0.75rem;
+    opacity: 0.55;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+  }
+  .devlog-card-lookout {
+    margin-top: 0.5rem;
+    font-size: 0.85rem;
+  }
+  .lookout-status {
+    text-transform: capitalize;
+  }
+  .lookout-tracked {
+    opacity: 0.65;
+  }
+  .devlog-card-lookout video {
+    display: block;
+    width: 100%;
+    max-height: 320px;
+    margin-top: 0.35rem;
+    background: #000;
+    border-radius: 4px;
   }
 
   .hackatime-row {
@@ -5206,6 +5782,78 @@
     color: #4b4840;
   }
 
+  .order-note-overlay {
+    position: fixed;
+    inset: 0;
+    background: rgba(0, 0, 0, 0.65);
+    z-index: 10000;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 20px;
+  }
+  .order-note-modal {
+    background: #cbc1ae;
+    border: 2px solid #1a1a1a;
+    box-shadow: 6px 6px 0 rgba(0, 0, 0, 0.4);
+    width: 100%;
+    max-width: 440px;
+    padding: 24px;
+    color: #4b4840;
+  }
+  .order-note-title {
+    margin: 0 0 6px;
+    font-size: 20px;
+  }
+  .order-note-hint {
+    margin: 0 0 14px;
+    font-size: 14px;
+    opacity: 0.75;
+  }
+  .order-note-input {
+    width: 100%;
+    box-sizing: border-box;
+    resize: vertical;
+    background: #ded5c3;
+    border: 2px solid #1a1a1a;
+    padding: 10px;
+    font: inherit;
+    color: #4b4840;
+  }
+  .order-note-count {
+    text-align: right;
+    font-size: 12px;
+    opacity: 0.6;
+    margin-top: 4px;
+  }
+  .order-note-actions {
+    display: flex;
+    justify-content: flex-end;
+    gap: 10px;
+    margin-top: 14px;
+  }
+  .order-note-cancel,
+  .order-note-confirm {
+    padding: 8px 18px;
+    border: 2px solid #1a1a1a;
+    font: inherit;
+    font-weight: 700;
+    cursor: pointer;
+  }
+  .order-note-cancel {
+    background: transparent;
+    color: #4b4840;
+  }
+  .order-note-confirm {
+    background: #4b4840;
+    color: #ede6d6;
+  }
+  .order-note-confirm:disabled,
+  .order-note-cancel:disabled {
+    opacity: 0.5;
+    cursor: default;
+  }
+
   .suggestions-close {
     position: absolute;
     top: 12px;
@@ -5792,61 +6440,6 @@
     margin: 1rem 0 0;
     color: #ffb3b3;
     font-size: 0.85rem;
-  }
-
-  /* ── tutorial warning modal ── */
-  .tutorial-warning-overlay {
-    position: fixed;
-    inset: 0;
-    background: rgba(0, 0, 0, 0.78);
-    z-index: 1200;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    backdrop-filter: blur(6px);
-    animation: fadeIn 200ms ease;
-    padding: 1rem;
-  }
-  .tutorial-warning-modal {
-    background: #4b4840;
-    color: #e8e0d4;
-    border: 1px solid #6c6659;
-    border-radius: 14px;
-    padding: 2rem 1.75rem;
-    width: 100%;
-    max-width: 440px;
-    text-align: center;
-    box-shadow: 0 20px 60px rgba(0, 0, 0, 0.5);
-    font-family: "Sunny Mood", "Courier New", monospace;
-  }
-  .tutorial-warning-title {
-    margin: 0 0 0.75rem;
-    font-size: 1.6rem;
-    font-family: "Sunny Mood", "Courier New", monospace;
-  }
-  .tutorial-warning-text {
-    margin: 0 0 1.5rem;
-    font-size: 1.1rem;
-    line-height: 1.5;
-    opacity: 0.9;
-    font-family: "Sunny Mood", "Courier New", monospace;
-  }
-  .tutorial-warning-ok {
-    padding: 0.65rem 2.5rem;
-    border-radius: 10px;
-    border: 1px solid #93b4cd;
-    background: #52504a;
-    color: #e8e0d4;
-    font-size: 1.1rem;
-    font-weight: 700;
-    cursor: pointer;
-    transition: transform 120ms ease, background 120ms ease, border-color 120ms ease;
-    font-family: "Sunny Mood", "Courier New", monospace;
-  }
-  .tutorial-warning-ok:hover {
-    background: #5d5a52;
-    border-color: #c5d8e6;
-    transform: translateY(-2px);
   }
 
   /* ── shop modal ── */
@@ -6787,10 +7380,6 @@
   .project-status-badge.approved {
     background: #93b4cd;
     color: #635a4e;
-  }
-
-  .project-status-badge.rejected {
-    background: #b34a4a;
   }
 
   .project-desc {

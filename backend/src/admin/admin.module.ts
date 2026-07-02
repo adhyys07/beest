@@ -16,6 +16,7 @@ import { Event } from '../entities/event.entity';
 import { ShopModule } from '../shop/shop.module';
 import { HcaModule } from '../hca/hca.module';
 import { DevlogsModule } from '../devlogs/devlogs.module';
+import { LookoutModule } from '../lookout/lookout.module';
 import { FraudReviewModule } from '../fraud-review/fraud-review.module';
 import { ProjectAirtableSyncModule } from '../projects/project-airtable-sync.module';
 import { IdentityModule } from '../identity/identity.module';
@@ -40,6 +41,7 @@ import { AuditServiceKeyGuard } from './audit-service-key.guard';
     ShopModule,
     HcaModule,
     DevlogsModule,
+    LookoutModule,
     FraudReviewModule,
     ProjectAirtableSyncModule,
     IdentityModule,

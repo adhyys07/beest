@@ -90,11 +90,20 @@
 	}
 
 	:global(button), :global(input), :global(textarea), :global(select) {
+		font: inherit;
+		background-repeat: no-repeat;
+	}
+
+	/* Strip native appearance everywhere EXCEPT checkboxes/radios. Stripping it
+	   from a checkbox with no custom box styling leaves it invisible (but still
+	   clickable); custom-styled checkboxes re-declare appearance: none locally. */
+	:global(button),
+	:global(input:not([type="checkbox"]):not([type="radio"])),
+	:global(textarea),
+	:global(select) {
 		appearance: none;
 		-webkit-appearance: none;
 		-moz-appearance: none;
-		font: inherit;
-		background-repeat: no-repeat;
 	}
 
 	:global(button) {

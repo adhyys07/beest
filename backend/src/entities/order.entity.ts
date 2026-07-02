@@ -41,6 +41,10 @@ export class Order {
   @Column({ length: 20, default: 'pending' })
   status: string; // 'pending' | 'fulfilled'
 
+  // Optional free-text note the buyer leaves for fulfillers at checkout.
+  @Column({ name: 'fulfillment_notes', type: 'varchar', length: 500, nullable: true })
+  fulfillmentNotes: string | null;
+
   // Public ID (cdg_…) of the HCB card grant issued for this order, if any.
   // Acts as a per-order idempotency lock: a non-null value blocks re-granting.
   @Column({ name: 'hcb_card_grant_id', type: 'varchar', length: 64, nullable: true })

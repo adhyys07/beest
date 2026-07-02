@@ -29,7 +29,7 @@ export class ShopController {
   @Post('purchase')
   async purchase(
     @Req() req: Request,
-    @Body() body: { shopItemId?: string; quantity?: number },
+    @Body() body: { shopItemId?: string; quantity?: number; note?: string },
   ) {
     const userId = (req as any).user?.uid;
     if (!userId) throw new BadRequestException('Not authenticated');
@@ -39,7 +39,11 @@ export class ShopController {
     if (body.quantity === undefined || !Number.isInteger(body.quantity) || body.quantity < 1) {
       throw new BadRequestException('quantity must be a positive integer');
     }
-    return this.shopService.purchase(userId, body.shopItemId, body.quantity);
+    const note =
+      typeof body.note === 'string' && body.note.trim()
+        ? body.note.trim().slice(0, 500)
+        : null;
+    return this.shopService.purchase(userId, body.shopItemId, body.quantity, note);
   }
 
   @UseGuards(JwtAuthGuard)

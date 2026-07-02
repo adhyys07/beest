@@ -78,13 +78,13 @@
 	let userSearch = $state('');
 	let permsFilter = $state('');
 	let selectedUser: UserSummary | null = $state(null);
-	let userDetail: UserDetail | null = $state(null);
+	let userDetail = $state<UserDetail | null>(null);
 	let detailLoading = $state(false);
 	let showPermsDropdown = $state(false);
 	let actionLoading = $state('');
 	let lightMode = $state(false);
 	let showHackatimeFiles = $state(false);
-
+	let showLookoutVideos = $state(false);
 	// News state
 	let newsItems: NewsItem[] = $state([]);
 	let newsLoading = $state(false);
@@ -380,13 +380,42 @@
 		title: string;
 		text: string;
 		imageUrls: string[];
+		lookout: {
+			status: string;
+			trackedSeconds: number | null;
+			videoUrl: string | null;
+			thumbnailUrl: string | null;
+		} | null;
+		approved: boolean;
+		approvedHours: number | null;
 		createdAt: string;
 	};
 	let projectDevlogs = $state<DevlogRecord[]>([]);
+	type LookoutSessionRecord = {
+		id: string;
+		name: string | null;
+		status: string;
+		trackedSeconds: number | null;
+		videoUrl: string | null;
+		thumbnailUrl: string | null;
+		createdAt: string | null;
+	};
+	let projectLookout = $state<{ sessions: LookoutSessionRecord[]; totalTrackedSeconds: number; completeCount: number } | null>(null);
+	// Lapse time (complete sessions only) folded into the project's total time.
+	let lookoutHours = $derived(
+		projectLookout ? Math.round((projectLookout.totalTrackedSeconds / 3600) * 10) / 10 : 0
+	);
 	let devlogLightbox = $state<string | null>(null);
 	function openDevlogLightbox(url: string) { devlogLightbox = url; }
 	function closeDevlogLightbox() { devlogLightbox = null; }
 	function onDevlogLightboxKey(e: KeyboardEvent) { if (e.key === 'Escape') closeDevlogLightbox(); }
+
+	function fmtLookoutTracked(secs: number | null): string {
+		if (!secs || secs <= 0) return '';
+		const h = Math.floor(secs / 3600);
+		const m = Math.floor((secs % 3600) / 60);
+		return h > 0 ? `${h}h ${m}m tracked` : `${m}m tracked`;
+	}
 
 	async function loadProjectDevlogs(projectId: string) {
 		try {
@@ -395,6 +424,46 @@
 			else projectDevlogs = [];
 		} catch {
 			projectDevlogs = [];
+		}
+	}
+
+	let devlogHoursDraft = $state<Record<string, string>>({});
+	let devlogReviewLoading = $state('');
+
+	let devlogApprovedHours = $derived(
+  		projectDevlogs.reduce((s, d) => s + (d.approved ? (d.approvedHours ?? 0) : 0), 0)
+	);
+
+	async function reviewDevlog(dl: DevlogRecord, approved: boolean){
+		const raw = devlogHoursDraft[dl.id] ?? String(dl.approvedHours ?? '');
+		const hours = parseFloat(raw);
+		devlogReviewLoading = dl.id;
+		try{
+    		const res = await fetch(`/api/admin/devlogs/${dl.id}/review`, {
+				method: 'PATCH',
+				headers: { 'Content-Type': 'application/json'},
+      			body: JSON.stringify({ approved, approvedHours: Number.isFinite(hours) ? hours : null }),
+		});
+		if (res.ok){
+			const data = await res.json();
+			dl.approved = data.approved;
+			dl.approvedHours = data.approvedHours;
+			if (expandedProjectId){
+				const ht = await fetch(`/api/admin/projects/${expandedProjectId}/hackatime`);
+       			 if (ht.ok) hackatimeData = await ht.json();
+			}
+		}
+	}	finally{
+		devlogReviewLoading = '';
+	}
+}
+
+	async function loadProjectLookout(projectId: string) {
+		try {
+			const res = await fetch(`/api/admin/projects/${projectId}/lookout`);
+			projectLookout = res.ok ? await res.json() : null;
+		} catch {
+			projectLookout = null;
 		}
 	}
 
@@ -618,6 +687,7 @@
 			lastQuickRejectInternalNote = '';
 			hideReviewerName = false;
 			projectDevlogs = [];
+			projectLookout = null;
 			closeAuditEmbed();
 			syncProjectUrl(null);
 			return;
@@ -638,11 +708,13 @@
 		showHackatimeFiles = false;
 		pastReviews = [];
 		projectDevlogs = [];
+		projectLookout = null;
 
 		const proj = allProjects.find(p => p.id === projectId);
 		persistentUserNote = proj?.user?.reviewerUserNote ?? '';
 		loadReviews(projectId);
 		loadProjectDevlogs(projectId);
+		loadProjectLookout(projectId);
 		if (proj?.status === 'unreviewed' || proj?.status === 'approved') {
 			hackatimeLoading = true;
 			try {
@@ -1612,6 +1684,8 @@
 			postalCode: string | null;
 			country: string | null;
 		} | null;
+		phone: string | null;
+		fulfillmentNotes : string | null;
 		addressMissing: boolean;
 		projects: { id: string; name: string; projectType: string | null; hours: number | null; approvedAt: string }[];
 	};
@@ -1637,6 +1711,10 @@
 		} catch {
 			orderDetails[orderId] = 'error';
 		}
+	}
+
+	function slackDmUrl(slackId: string | null): string | null {
+		return slackId ? `https://slack.com/app_redirect?channel=${encodeURIComponent(slackId)}` : null;
 	}
 
 	async function copyAddressLine(key: string, value: string | null | undefined) {
@@ -2308,7 +2386,11 @@
 								{@const isOpen = expandedOrderId === order.id}
 								<tr class:fulfilled={order.status === 'fulfilled'} class:order-row={true} class:order-row-open={isOpen} onclick={() => toggleOrderRow(order.id)} onkeydown={(e) => { const tag = (e.target as HTMLElement).tagName; if ((e.key === 'Enter' || e.key === ' ') && tag !== 'INPUT' && tag !== 'TEXTAREA' && tag !== 'SELECT') { e.preventDefault(); toggleOrderRow(order.id); } }} tabindex="0" role="button" aria-expanded={isOpen}>
 									<td><span class="order-row-toggle" aria-hidden="true">{isOpen ? '▾' : '▸'}</span> {order.itemName}</td>
-									<td>{order.userName}{order.userEmail ? ` (${order.userEmail})` : ''}</td>
+									<td>{order.userName}{order.userEmail ? ` (${order.userEmail})` : ''}
+										{#if order.userSlackId}
+											<a class="order-slack-dm" href={slackDmUrl(order.userSlackId)} target="_blank" title={`DM ${order.userName} on Slack (${order.userSlackId})`} rel="noopener" onclick={(e) => e.stopPropagation()}>DM {order.userSlackId}</a>
+										{/if}
+									</td>
 									<td>{order.quantity}</td>
 									<td>{order.pipesSpent}</td>
 									<td><span class="status-badge" class:status-pending={order.status === 'pending'} class:status-fulfilled={order.status === 'fulfilled'}>{order.status}</span></td>
@@ -2360,6 +2442,12 @@
 												<div class="order-detail-error">Failed to load order detail. <button class="link-btn" onclick={() => toggleOrderRow(order.id)}>Retry</button></div>
 											{:else}
 												<div class="order-detail">
+													{#if detail.fulfillmentNotes}
+														<div class="order-detail-section order-note-callout">
+															<h4 class="order-detail-heading">Buyer note</h4>
+															<p class="order-note-text">{detail.fulfillmentNotes}</p>
+														</div>
+													{/if}
 													<div class="order-detail-section">
 														<h4 class="order-detail-heading">Shipping address <span class="order-detail-hint">(click any line to copy)</span></h4>
 														{#if detail.addressMissing || !detail.address}
@@ -2401,6 +2489,23 @@
 																	</li>
 																{/if}
 															</ul>
+														{/if}
+													</div>
+													<div class="order-detail-section">
+														<h4 class = "order-detail-heading">Contact</h4>
+														{#if detail.phone}
+															{@const ok =`${order.id}:phone`}
+															<ul class = "address-lines">
+																<li>
+																	<button type="button" class="address-line" class:copied={copiedKey === ok} onclick={() => copyAddressLine(ok, detail.phone)} title="Click to copy">
+																		<span class="address-label">Phone</span>
+																		<span class="address-value">{detail.phone}</span>
+																		<span class="address-copied">{copiedKey === ok ? 'copied!' : 'copy'}</span>
+																	</button>
+																</li>
+															</ul>
+														{:else}
+															<p class="order-detail-empty">No phone number on file in HCA</p>
 														{/if}
 													</div>
 													<div class="order-detail-section">
@@ -2825,10 +2930,12 @@
 														hackatimeData = null;
 														pastReviews = [];
 														projectDevlogs = [];
+														projectLookout = null;
 														await Promise.all([
 															selectProject(p.id),
 															loadReviews(p.id),
-															loadProjectDevlogs(p.id)
+															loadProjectDevlogs(p.id),
+															loadProjectLookout(p.id)
 														]);
 													}}
 													>
@@ -2870,7 +2977,10 @@
 										<div class="ht-detail">
 											<div class="ht-header">
 												<span class="ht-trust">Trust Level: <strong class="trust-{displayTrust || 'unknown'}">{{ blue: 'standard', yellow: 'warned', red: 'banned' }[displayTrust] ?? hackatimeData.trustLevel ?? 'unknown'}</strong></span>
-												<span class="ht-total">{hackatimeData.totalHours}h total</span>
+												<span class="ht-total">
+													{Math.round((hackatimeData.totalHours + lookoutHours) * 10) / 10}h total
+													{#if lookoutHours > 0}<span class="ht-total-note">(Hackatime {hackatimeData.totalHours}h + timelapse {lookoutHours}h)</span>{/if}
+												</span>
 												{#if hackatimeData.earliestHeartbeat}
 													<span class="ht-earliest">first heartbeat: {new Date(hackatimeData.earliestHeartbeat * 1000).toLocaleDateString('en-US', { year: 'numeric', month: 'short', day: 'numeric' })}</span>
 												{/if}
@@ -2888,6 +2998,12 @@
 													perProject={hackatimeData.hackatimeProjects.map((hp) => ({ name: hp.name, hours: hp.hours }))}
 													startDate={hackatimeData.startDate}
 												/>
+												{#if projectLookout && lookoutHours > 0}
+													<div class="ht-lookout-line">
+														<span class="ht-lookout-label">Lookout timelapse ({projectLookout.completeCount} complete)</span>
+														<span class="ht-lookout-hours">{lookoutHours}h</span>
+													</div>
+												{/if}
 											</div>
 
 											<div class="ht-files">
@@ -3088,9 +3204,57 @@
 									</div>
 								{/if}
 
+								{#if projectLookout && projectLookout.sessions.length > 0}
+									<hr class="proj-divider" />
+									<div class="lookout-review-head">
+										<h4 class="reviews-heading">Timelapses ({projectLookout.sessions.length})</h4>
+										<div class="lookout-review-head-right">
+										{#if lookoutHours > 0}
+											<span class="lookout-review-total">{lookoutHours}h tracked · {projectLookout.completeCount} complete</span>
+										{/if}
+										<button
+											type="button"
+											class="ht-files-toggle"
+											onclick={()=> (showLookoutVideos = !showLookoutVideos)}
+											aria-expanded={showLookoutVideos}
+											>
+												{showLookoutVideos ? 'Hide': 'Show'}
+											</button>
+										</div>
+									</div>
+									{#if showLookoutVideos}
+										<div class="lookout-review-grid">
+											{#each projectLookout.sessions as s (s.id)}
+												<div class="lookout-review-card" class:pending={s.status !== 'complete'}>
+													{#if s.status === 'complete' && s.videoUrl}
+														<video controls preload="metadata" poster={s.thumbnailUrl ?? undefined} src={s.videoUrl}>
+															<track kind="captions" />
+														</video>
+													{:else if s.thumbnailUrl}
+														<img src={s.thumbnailUrl} alt="Timelapse thumbnail" loading="lazy" />
+													{:else}
+														<div class="lookout-review-novid">No preview</div>
+													{/if}
+													<div class="lookout-review-meta">
+														<span class="lookout-review-name">{s.name ?? (s.status === 'complete' ? 'Timelapse' : s.status)}</span>
+														<span class="lookout-review-sub">
+															{#if s.trackedSeconds}{fmtLookoutTracked(s.trackedSeconds)} · {/if}
+															{s.createdAt ? formatDate(s.createdAt) : 'recent'}
+															{#if s.status !== 'complete'} · {s.status}{/if}
+														</span>
+													</div>
+												</div>
+											{/each}
+											</div>
+											{/if}
+										{/if}
+
 								{#if projectDevlogs.length > 0}
 									<hr class="proj-divider" />
-									<h4 class="reviews-heading">Devlogs ({projectDevlogs.length})</h4>
+									<h4 class="reviews-heading">
+										Devlogs ({projectDevlogs.length})
+										{#if devlogApprovedHours > 0}<span class="devlog-approved-total"> · {Math.round(devlogApprovedHours * 10) / 10}h approved into project</span>{/if}
+									</h4>
 									<div class="devlogs-list">
 										{#each projectDevlogs as dl}
 											<div class="devlog-card">
@@ -3109,6 +3273,49 @@
 														{/each}
 													</div>
 												{/if}
+												{#if dl.lookout}
+													<div class="devlog-card-lookout">
+														<span class="devlog-lookout-status">{dl.lookout.status}</span>
+														{#if dl.lookout.trackedSeconds}
+															<span class="devlog-lookout-tracked"> · {fmtLookoutTracked(dl.lookout.trackedSeconds)}</span>
+														{/if}
+														{#if dl.lookout.status === 'complete' && dl.lookout.videoUrl}
+															<video controls preload="metadata" poster={dl.lookout.thumbnailUrl ?? undefined} src={dl.lookout.videoUrl}>
+																<track kind="captions" />
+															</video>
+														{:else}
+															<span class="devlog-lookout-pending"> · timelapse not finished yet</span>
+														{/if}
+													</div>
+												{/if}
+											<div class="devlog-review-bar">
+												<label class="devlog-hours-field">
+													Hours
+													<input
+														type="number" min="0" step="0.1"
+														class="devlog-hours-input"
+														value={devlogHoursDraft[dl.id] ?? (dl.approvedHours ?? '')}
+														oninput={(e) => devlogHoursDraft[dl.id] = e.currentTarget.value}
+													/>
+												</label>
+												{#if dl.lookout?.trackedSeconds}
+													<button type="button" class="devlog-hours-suggest"
+														onclick={() => devlogHoursDraft[dl.id] = ((dl.lookout?.trackedSeconds ?? 0) / 3600).toFixed(1)}
+														title="Use the attached timelapse's tracked time">
+														lapse: {fmtLookoutTracked(dl.lookout?.trackedSeconds ?? null)}
+													</button>
+												{/if}
+												{#if dl.approved}
+													<span class="devlog-approved-tag">✓ {dl.approvedHours}h approved</span>
+													<button type="button" class="devlog-unapprove" disabled={devlogReviewLoading === dl.id}
+														onclick={() => reviewDevlog(dl, false)}>Unapprove</button>
+												{:else}
+													<button type="button" class="devlog-approve" disabled={devlogReviewLoading === dl.id}
+														onclick={() => reviewDevlog(dl, true)}>
+														{devlogReviewLoading === dl.id ? 'Saving…' : 'Approve'}
+													</button>
+												{/if}
+											</div>
 											</div>
 										{/each}
 									</div>
@@ -4035,7 +4242,8 @@
 	.proj-sidebar-meta {
 		display: flex;
 		align-items: center;
-		gap: 0.5rem;
+		flex-wrap: wrap;
+		gap: 0.35rem 0.5rem;
 		color: #888;
 		font-size: 0.75rem;
 	}
@@ -4068,6 +4276,10 @@
 		background: rgba(251, 191, 36, 0.15);
 		color: #d97706;
 		border: 1px solid rgba(251, 191, 36, 0.4);
+		max-width: 100%;
+		white-space: nowrap;
+		overflow: hidden;
+		text-overflow: ellipsis;
 	}
 	.claim-badge--mine {
 		background: rgba(59, 130, 246, 0.12);
@@ -5010,6 +5222,75 @@
 		margin-left: auto;
 	}
 
+	.devlog-review-bar {
+		display: flex;
+		align-items: center;
+		gap: 0.6rem;
+		flex-wrap: wrap;
+		margin-top: 0.6rem;
+		padding-top: 0.6rem;
+		border-top: 1px dashed rgba(255, 255, 255, 0.12);
+	}
+	.devlog-hours-field {
+		display: flex;
+		align-items: center;
+		gap: 0.35rem;
+		font-size: 0.8rem;
+		color: #aaa;
+	}
+	.devlog-hours-input {
+		width: 5rem;
+		padding: 0.2rem 0.4rem;
+		border: 1px solid #555;
+		border-radius: 4px;
+		background: #1e1e1e;
+		color: inherit;
+		font: inherit;
+	}
+	.devlog-hours-suggest {
+		border: 1px solid #4a6;
+		background: transparent;
+		color: #6c9;
+		border-radius: 4px;
+		padding: 0.2rem 0.5rem;
+		font-size: 0.75rem;
+		cursor: pointer;
+	}
+	.devlog-approve,
+	.devlog-unapprove {
+		border-radius: 4px;
+		padding: 0.25rem 0.7rem;
+		font-size: 0.8rem;
+		font-weight: 700;
+		cursor: pointer;
+		border: 1px solid;
+	}
+	.devlog-approve {
+		background: #2a7;
+		border-color: #2a7;
+		color: #fff;
+	}
+	.devlog-unapprove {
+		background: transparent;
+		border-color: #888;
+		color: #ccc;
+	}
+	.devlog-approve:disabled,
+	.devlog-unapprove:disabled {
+		opacity: 0.5;
+		cursor: default;
+	}
+	.devlog-approved-tag {
+		font-size: 0.8rem;
+		font-weight: 700;
+		color: #5a9e6f;
+	}
+	.devlog-approved-total {
+		font-size: 0.8rem;
+		font-weight: 600;
+		color: #5a9e6f;
+	}
+
 	.devlog-card-title {
 		margin: 0 0 4px;
 		font-size: 0.95rem;
@@ -5031,6 +5312,27 @@
 		flex-wrap: wrap;
 		gap: 0.4rem;
 		margin-top: 0.5rem;
+	}
+
+	.devlog-card-lookout {
+		margin-top: 0.5rem;
+		font-size: 0.8rem;
+		color: #ddd;
+	}
+	.devlog-lookout-status {
+		text-transform: capitalize;
+	}
+	.devlog-lookout-tracked,
+	.devlog-lookout-pending {
+		opacity: 0.65;
+	}
+	.devlog-card-lookout video {
+		display: block;
+		width: 100%;
+		max-height: 360px;
+		margin-top: 0.35rem;
+		background: #000;
+		border-radius: 4px;
 	}
 
 	.devlog-card-image-btn {
@@ -5106,6 +5408,88 @@
 		display: flex;
 		flex-direction: column;
 		gap: 0.75rem;
+	}
+
+	.ht-total-note {
+		font-size: 0.78rem;
+		font-weight: 400;
+		opacity: 0.7;
+		margin-left: 0.35rem;
+	}
+	.ht-lookout-line {
+		display: flex;
+		align-items: baseline;
+		justify-content: space-between;
+		gap: 0.5rem;
+		margin-top: 0.5rem;
+		padding-top: 0.5rem;
+		border-top: 1px dashed rgba(255, 255, 255, 0.15);
+	}
+	.ht-lookout-label {
+		font-size: 0.85rem;
+		opacity: 0.85;
+	}
+	.ht-lookout-hours {
+		font-weight: 700;
+		color: #5a9e6f;
+	}
+	.lookout-review-head {
+		display: flex;
+		align-items: baseline;
+		justify-content: space-between;
+		gap: 0.5rem;
+	}
+	.lookout-review-head-right {
+		display:flex;
+		align-items:center;
+		gap: 0.6rem;
+	}
+	.lookout-review-total {
+		font-size: 0.85rem;
+		font-weight: 700;
+		color: #5a9e6f;
+	}
+	.lookout-review-grid {
+		display: grid;
+		grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+		gap: 0.75rem;
+		margin-top: 0.5rem;
+	}
+	.lookout-review-card {
+		border-radius: 8px;
+		overflow: hidden;
+		background: rgba(0, 0, 0, 0.15);
+	}
+	.lookout-review-card.pending {
+		opacity: 0.6;
+	}
+	.lookout-review-card video,
+	.lookout-review-card img {
+		width: 100%;
+		aspect-ratio: 16 / 9;
+		object-fit: cover;
+		display: block;
+	}
+	.lookout-review-novid {
+		display: grid;
+		place-items: center;
+		aspect-ratio: 16 / 9;
+		font-size: 0.8rem;
+		opacity: 0.5;
+	}
+	.lookout-review-meta {
+		display: flex;
+		flex-direction: column;
+		gap: 0.15rem;
+		padding: 0.5rem;
+	}
+	.lookout-review-name {
+		font-weight: 700;
+		font-size: 0.85rem;
+	}
+	.lookout-review-sub {
+		font-size: 0.75rem;
+		opacity: 0.7;
 	}
 
 	.ht-header {
@@ -6060,6 +6444,22 @@
 		background: rgba(0,0,0,0.18);
 		border-top: 1px dashed rgba(255,255,255,0.08);
 	}
+
+	.order-slack-dm {
+		margin-left: 8px;
+		padding: 1px 7px;
+		border: 1px solid #4a154b;
+		border-radius: 4px;
+		background: #4a154b;
+		color: #fff;
+		font-size: 0.8rem;
+		text-decoration: none;
+		white-space: nowrap;
+	}
+
+	.order-slack-dm:hover { background: #4a154b; }
+	.order-slack-dm-line { text-decoration: none; }
+
 	.admin-shell.light .order-detail-row td { background: rgba(0,0,0,0.03); border-top-color: rgba(0,0,0,0.08); }
 
 	.order-detail {
@@ -6067,6 +6467,17 @@
 		grid-template-columns: minmax(260px, 1fr) minmax(260px, 1.4fr);
 		gap: 1.5rem;
 	}
+
+	.order-note-callout {
+		border-left: 3px solid #d8a657;
+		padding-left: 0.6rem;
+	}
+
+	.order-note-text {
+		white-space: pre-wrap;
+		font-size: 0.9rem;
+	}
+	
 	.order-detail-section { min-width: 0; }
 	.order-detail-heading {
 		margin: 0 0 0.5rem;
