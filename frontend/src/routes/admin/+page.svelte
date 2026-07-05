@@ -3008,7 +3008,7 @@
 									<div class="user-feedback-box">
 										<label class="user-feedback-label">
 											User-Wide Reviewer Note:
-											<textarea bind:this={persistentUserNoteEl} class="user-feedback" bind:value={persistentUserNote} rows="4" placeholder="Persistent note shown to this builder across all of their projects..."></textarea>
+											<textarea bind:this={persistentUserNoteEl} class="user-feedback" bind:value={persistentUserNote} rows="4" placeholder="Persistent internal note about this builder, shown to reviewers across all of their projects — not visible to the builder..."></textarea>
 										</label>
 									</div>
 
