@@ -1694,6 +1694,8 @@
             <li><a href="/admin" class="nav-btn nav-link">Admin</a></li>
           {:else if data.role === 'Reviewer' || data.role === 'Fraud Reviewer'}
             <li><a href="/admin" class="nav-btn nav-link">Review</a></li>
+          {:else if data.role === 'Fulfiller'}
+            <li><a href="/admin" class="nav-btn nav-link">Fulfillment</a></li>
           {/if}
         </ul>
         {#if stickerLink}
