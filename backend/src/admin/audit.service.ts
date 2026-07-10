@@ -131,11 +131,30 @@ export class AuditService {
    * state, now repurposed as the second-pass queue). Oldest first.
    */
   async listQueue(): Promise<unknown[]> {
+    // sort by when they clicked submit
+    const rows = await this.projectRepo.query(
+      `
+        SELECT p.id
+        FROM projects p
+        LEFT JOIN (
+          SELECT s.project_id, MAX(s.created_at) AS max_created_at
+          FROM submissions s
+          GROUP BY s.project_id
+        ) sub ON sub.project_id = p.id
+        WHERE p.status = 'fraud_pending'
+        ORDER BY sub.max_created_at ASC NULLS LAST, p.created_at ASC
+      `
+    );
+
+    const ids = rows.map((r: any) => r.id);
+    if (ids.length === 0) {
+      return [];
+    }
     const projects = await this.projectRepo.find({
-      where: { status: 'fraud_pending' },
+      where: { id: In(ids) },
       relations: ['user'],
-      order: { createdAt: 'ASC' },
     });
+    projects.sort((a, b) => ids.indexOf(a.id) - ids.indexOf(b.id));
 
     return Promise.all(projects.map((p) => this.serializeQueueItem(p)));
   }
@@ -159,14 +178,32 @@ export class AuditService {
     }
 
     const safeLimit = Math.max(1, Math.min(limit, 25));
-    const candidates = await this.projectRepo.find({
-      where: { status: 'unreviewed' },
-      order: { createdAt: 'ASC' },
-      take: safeLimit,
-    });
-    if (candidates.length === 0) {
+    // get the ones submitted first
+    const rows = await this.projectRepo.query(
+      `
+        SELECT p.id
+        FROM projects p
+        LEFT JOIN (
+          SELECT s.project_id, MAX(s.created_at) AS max_created_at
+          FROM submissions s
+          WHERE s.status = 'unreviewed'
+          GROUP BY s.project_id
+        ) sub ON sub.project_id = p.id
+        WHERE p.status = 'unreviewed'
+        ORDER BY sub.max_created_at ASC NULLS LAST, p.created_at ASC
+        LIMIT $1
+      `,
+      [safeLimit],
+    );
+
+    const ids = rows.map((r: any) => r.id);
+    if (ids.length === 0) {
       return { loaded: 0 };
     }
+    const candidates = await this.projectRepo.find({
+      where: { id: In(ids) },
+    });
+    candidates.sort((a, b) => ids.indexOf(a.id) - ids.indexOf(b.id));
 
     for (const p of candidates) {
       p.status = 'fraud_pending';

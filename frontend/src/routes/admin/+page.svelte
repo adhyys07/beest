@@ -789,8 +789,12 @@
 			// Most recently created first.
 			sorted.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
 		} else {
-			// Longest in the wait queue first = oldest createdAt first.
-			sorted.sort((a, b) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime());
+			// oldest submission goes first
+			sorted.sort((a, b) => {
+				const timeA = a.latestSubmission?.createdAt ? new Date(a.latestSubmission.createdAt).getTime() : new Date(a.createdAt).getTime();
+				const timeB = b.latestSubmission?.createdAt ? new Date(b.latestSubmission.createdAt).getTime() : new Date(b.createdAt).getTime();
+				return timeA - timeB;
+			});
 		}
 		return sorted;
 	});
