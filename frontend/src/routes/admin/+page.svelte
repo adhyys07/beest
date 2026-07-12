@@ -789,8 +789,12 @@
 			// Most recently created first.
 			sorted.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
 		} else {
-			// Longest in the wait queue first = oldest createdAt first.
-			sorted.sort((a, b) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime());
+			// oldest submission goes first
+			sorted.sort((a, b) => {
+				const timeA = a.latestSubmission?.createdAt ? new Date(a.latestSubmission.createdAt).getTime() : new Date(a.createdAt).getTime();
+				const timeB = b.latestSubmission?.createdAt ? new Date(b.latestSubmission.createdAt).getTime() : new Date(b.createdAt).getTime();
+				return timeA - timeB;
+			});
 		}
 		return sorted;
 	});
@@ -2105,7 +2109,7 @@
 														<td>{order.itemName}</td>
 														<td>{order.quantity}</td>
 														<td>{order.pipesSpent}</td>
-														<td><span class="status-badge" class:status-pending={order.status === 'pending'} class:status-fulfilled={order.status === 'fulfilled'}>{order.status}</span></td>
+														<td><span class="status-badge" class:status-pending={order.status === 'pending'} class:status-fulfilled={order.status === 'fulfilled'} class:status-cancelled={order.status === 'cancelled'}>{order.status}</span></td>
 														<td>{formatDate(order.createdAt)}</td>
 													</tr>
 												{/each}
@@ -2350,6 +2354,7 @@
 						<option value="">All Statuses</option>
 						<option value="pending">Pending</option>
 						<option value="fulfilled">Fulfilled</option>
+						<option value="cancelled">Cancelled</option>
 					</select>
 					<select bind:value={fulfillmentItemFilter} class="users-perms-filter">
 						<option value="">All Items</option>
@@ -2393,7 +2398,7 @@
 									</td>
 									<td>{order.quantity}</td>
 									<td>{order.pipesSpent}</td>
-									<td><span class="status-badge" class:status-pending={order.status === 'pending'} class:status-fulfilled={order.status === 'fulfilled'}>{order.status}</span></td>
+									<td><span class="status-badge" class:status-pending={order.status === 'pending'} class:status-fulfilled={order.status === 'fulfilled'} class:status-cancelled={order.status === 'cancelled'}>{order.status}</span></td>
 									<td>{order.pendingSince !== null ? formatPendingTime(order.pendingSince) : '—'}</td>
 									<td class="fulfillment-actions" onclick={(e) => e.stopPropagation()}>
 										{#if order.status === 'pending'}
@@ -6348,6 +6353,7 @@
 	}
 	.status-pending { background: rgba(196, 131, 130, 0.25); color: #c48382; }
 	.status-fulfilled { background: rgba(147, 180, 205, 0.25); color: #93b4cd; }
+	.status-cancelled { background: rgba(150, 150, 150, 0.25); color: #9a978f; }
 
 	.fulfillment-actions {
 		display: flex;
@@ -6434,6 +6440,7 @@
 	.admin-shell.light .fulfillment-msg-input { background: #fff; border-color: #ccc; color: #1a1a1a; }
 	.admin-shell.light .status-pending { background: rgba(196, 131, 130, 0.15); }
 	.admin-shell.light .status-fulfilled { background: rgba(147, 180, 205, 0.15); }
+	.admin-shell.light .status-cancelled { background: rgba(150, 150, 150, 0.15); }
 
 	.order-row { cursor: pointer; }
 	.order-row-toggle { display: inline-block; width: 1em; color: #93b4cd; }

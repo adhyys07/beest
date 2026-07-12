@@ -213,7 +213,13 @@
   ];
 
   // Wall of Fame
-  const wallOfFameProjects = [
+  const wallOfFameProjects: {
+    title: string;
+    author: string;
+    description: string;
+    link: string;
+    tag?: string;
+  }[] = [
     {
       title: 'Seaward',
       author: 'moaaz',
@@ -656,7 +662,8 @@
     <div class="footer-links">
       <a href="https://hackclub.com/slack" target="_blank" rel="noreferrer">Slack</a>
       <a href="https://github.com/hackclub" target="_blank" rel="noreferrer">GitHub</a>
-      <a href="https://hackclub.com/privacy-and-terms/" target="_blank" rel="noreferrer">Privacy</a>
+      <a href="https://hackclub.com/privacy-and-terms/" target="_blank" rel="noreferrer">Privacy &amp; Terms</a>
+      <a href="https://forms.hackclub.com/bounty" target="_blank" rel="noreferrer">Fulfillment Bounty</a>
     </div>
   </div>
   <p class="footer-love">made with <a href="https://hackclub.com/philosophy/" target="_blank" rel="noopener noreferrer">&lt;3</a> by <a href="https://github.com/EDRipper" target="_blank" rel="noopener noreferrer">teens</a> for <a href="https://slack.hackclub.com" target="_blank" rel="noopener noreferrer">teens</a></p>
