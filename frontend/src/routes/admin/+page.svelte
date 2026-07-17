@@ -6,6 +6,7 @@
 	import TimelapsePanel from '$lib/components/admin/TimelapsePanel.svelte';
 	import CardGrantModal from '$lib/components/admin/CardGrantModal.svelte';
 	import ItemBuyersModal from '$lib/components/admin/ItemBuyersModal.svelte';
+	import SiloGrantModal from '$lib/components/admin/SiloGrantModal.svelte';
 	import { onMount, tick } from 'svelte';
 	import { replaceState } from '$app/navigation';
 
@@ -1709,6 +1710,7 @@
 		pipesSpent: number;
 		status: string;
 		hcbCardGrantId: string | null;
+		siloGrantId: string | null;
 		createdAt: string;
 		updatedAt: string;
 		userName: string;
@@ -1735,6 +1737,24 @@
 	};
 	let hcbStatus = $state<HcbStatus | null>(null);
 	let grantModalOrder = $state<AdminOrder | null>(null);
+
+	// SILO grants
+	type SiloStatus = { configured: boolean };
+	let siloStatus = $state<SiloStatus | null>(null);
+	let siloGrantModalOrder = $state<AdminOrder | null>(null);
+
+	async function loadSiloStatus() {
+		try {
+			const res = await fetch('/api/admin/silo/status');
+			if (res.ok) siloStatus = await res.json();
+		} catch {
+			/* leave null */
+		}
+	}
+
+	function onSiloGrantIssued() {
+		loadFulfillment();
+	}
 
 	async function loadHcbStatus() {
 		try {
@@ -1921,7 +1941,7 @@
 		if (activeTab === 'events') { loadEvents(); loadUsers(); }
 		if (activeTab === 'projects') { loadProjects(); loadProjectHours(); }
 		if (activeTab === 'shop') loadShop();
-		if (activeTab === 'fulfillment') { loadFulfillment(); loadHcbStatus(); }
+		if (activeTab === 'fulfillment') { loadFulfillment(); loadHcbStatus(); loadSiloStatus(); }
 		if (activeTab === 'leaderboard') loadLeaderboard();
 	});
 </script>
@@ -2441,6 +2461,15 @@
 						{/if}
 					</div>
 				{/if}
+				{#if siloStatus}
+					<div class="hcb-banner" class:hcb-ok={siloStatus.configured} class:hcb-warn={!siloStatus.configured}>
+						{#if !siloStatus.configured}
+							<span>⚠ SILO storage grants are not configured on the server (set SILO_API_KEY).</span>
+						{:else}
+							<span>✓ SILO storage grants enabled</span>
+						{/if}
+					</div>
+				{/if}
 				<div class="fulfillment-toolbar">
 					<select bind:value={fulfillmentStatusFilter} class="users-perms-filter" onchange={() => loadFulfillment()}>
 						<option value="">All Statuses</option>
@@ -2513,6 +2542,14 @@
 												disabled={!!order.hcbCardGrantId}
 												title={order.hcbCardGrantId ? `Grant already issued (${order.hcbCardGrantId})` : 'Issue an HCB card grant for this order'}
 											>{order.hcbCardGrantId ? 'Granted' : 'Card grant'}</button>
+										{/if}
+										{#if siloStatus?.configured}
+											<button
+												class="btn btn-sm btn-grant"
+												onclick={() => (siloGrantModalOrder = order)}
+												disabled={!!order.siloGrantId}
+												title={order.siloGrantId ? `SILO grant already issued (${order.siloGrantId})` : 'Issue a SILO storage grant for this order'}
+											>{order.siloGrantId ? 'Granted' : 'SILO grant'}</button>
 										{/if}
 										<div class="fulfillment-msg-row">
 											<input
@@ -3608,6 +3645,14 @@
 
 {#if buyersModalItem}
 	<ItemBuyersModal item={buyersModalItem} onClose={() => (buyersModalItem = null)} />
+{/if}
+
+{#if siloGrantModalOrder}
+	<SiloGrantModal
+		order={siloGrantModalOrder}
+		onClose={() => (siloGrantModalOrder = null)}
+		onGranted={() => { onSiloGrantIssued(); }}
+	/>
 {/if}
 
 <style>

@@ -423,6 +423,7 @@ export class ShopService {
         'order.pipesSpent',
         'order.status',
         'order.hcbCardGrantId',
+        'order.siloGrantId',
         'order.createdAt',
         'order.updatedAt',
         'user.id',
@@ -459,6 +460,7 @@ export class ShopService {
       pipesSpent: o.pipesSpent,
       status: o.status,
       hcbCardGrantId: o.hcbCardGrantId ?? null,
+      siloGrantId: o.siloGrantId ?? null,
       createdAt: o.createdAt,
       updatedAt: o.updatedAt,
       userName: o.user?.nickname || o.user?.name || 'Unknown',
@@ -649,6 +651,12 @@ export class ShopService {
             'already been issued for this order. Reconcile it in HCB instead.',
         );
       }
+      if (order.siloGrantId) {
+        throw new ConflictException(
+          `Cannot refund: a SILO grant (${order.siloGrantId}) has ` +
+            'already been issued for this order. Reconcile it in SILO instead.',
+        );
+      }
 
       const user = await manager.findOne(User, {
         where: { id: order.userId },
@@ -755,6 +763,13 @@ export class ShopService {
         throw new ConflictException(
           `Cannot merge: order ${granted.id} has an HCB card grant ` +
             `(${granted.hcbCardGrantId}). Reconcile it in HCB instead.`,
+        );
+      }
+      const siloGranted = [target, ...others].find((o) => o.siloGrantId);
+      if (siloGranted) {
+        throw new ConflictException(
+          `Cannot merge: order ${siloGranted.id} has a SILO grant ` +
+            `(${siloGranted.siloGrantId}). Reconcile it in SILO instead.`,
         );
       }
 
