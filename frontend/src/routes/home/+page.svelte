@@ -140,7 +140,6 @@
   let detailCommentText = $state('');
   let detailCommentSubmitting = $state(false);
   let detailActiveImg = $state(0);
-  let stickerLink = $state<string | null>(null);
 
   // Shop state
   type ShopItemType = { id: string; name: string; description: string; detailedDescription: string | null; imageUrl: string; priceHours: number; stock: number | null; sortOrder: number; isFeatured: boolean; isSuperFeatured: boolean; isBlackMarket: boolean; estimatedShip: string | null };
@@ -1627,16 +1626,6 @@
     genderSaving = false;
   }
 
-  async function fetchStickerLink() {
-    try {
-      const res = await fetch('/api/onboarding/sticker-link');
-      if (res.ok) {
-        const data = await res.json();
-        stickerLink = data.link ?? null;
-      }
-    } catch { /* ignore */ }
-  }
-
   onMount(() => {
     if (customCursorEnabled) {
       document.documentElement.classList.add('custom-cursor');
@@ -1657,7 +1646,6 @@
     fetchProjectHours();
     fetchLeaderboard();
     fetchExploreProjects();
-    fetchStickerLink();
     fetchPipes();
     fetchUnreadCount();
     loadSectionData(activeSection);
@@ -1722,12 +1710,6 @@
             {@render adminNavLink('Fulfillment')}
           {/if}
         </ul>
-        {#if stickerLink}
-        <a href={stickerLink} target="_blank" rel="noopener" class="sticker-promo">
-          <img src="/images/sticker.webp" alt="Beest sticker" class="sticker-img" />
-          <span class="sticker-text">Get Stickers</span>
-        </a>
-        {/if}
       </div>
     </div>
     <div class="teeth outer" aria-hidden="true"></div>
@@ -3752,34 +3734,6 @@
   .nav-btn.active .nav-icon,
   .nav-btn:hover .nav-icon {
     opacity: 1;
-  }
-
-  .sticker-promo {
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-    gap: 8px;
-    text-decoration: none;
-    margin-top: 10px;
-    padding: 6px 0;
-    transition: opacity 150ms ease;
-  }
-
-  .sticker-promo:hover {
-    opacity: 0.8;
-  }
-
-  .sticker-img {
-    width: 80px;
-    height: auto;
-    border-radius: 10px;
-  }
-
-  .sticker-text {
-    font-family: "Stone Breaker", "Courier New", monospace;
-    font-size: 14px;
-    color: #cbc1ae;
-    letter-spacing: 0.04em;
   }
 
 
@@ -9179,7 +9133,6 @@
 
     /* Strip noisy desktop-only widgets on mobile */
     .bottom-row,
-    .sticker-promo,
     .progress-key,
     .mobile-only-hide {
       display: none !important;
