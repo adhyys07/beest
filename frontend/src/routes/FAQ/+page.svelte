@@ -38,7 +38,7 @@
     },
     {
       q: 'Where and when does Beest take place?',
-      a: 'Beest runs August 19–21 at Scheveningen Beach in the Netherlands. The Strandbeest exhibition happens during that same window, so participants get to see it as part of the event.'
+      a: 'Beest runs August 19–21 at The Hague Tech in the Netherlands. The Strandbeest exhibition happens during that same window, so participants get to see it as part of the event, before exhibiting their own mechanisms on Scheveningen beach on the final day.'
     },
     {
       q: 'How will the event run?',
