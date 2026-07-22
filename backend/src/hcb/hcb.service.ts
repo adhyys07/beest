@@ -278,20 +278,28 @@ export class HcbService {
     return {
       recipientEmail: order.user?.email ?? '',
       suggestedAmountCents: suggested,
-      purpose: this.defaultPurpose(),
+      purpose: this.defaultPurpose(order.itemName),
       orgId: this.orgId,
       alreadyGranted: !!order.hcbCardGrantId,
       existingGrantId: order.hcbCardGrantId,
     };
   }
 
-  // Deliberately does NOT use the order's item name: shop item names often
-  // carry a price (e.g. "$25 Amazon Gift Card"), and HCB's pre-authorization
-  // fraud check reads this purpose text — a dollar figure in there that
-  // doesn't exactly match the transaction has been triggering false fraud
-  // flags on legitimate grants. Keep this generic and price-free.
-  private defaultPurpose(): string {
-    return 'Beest shop reward';
+  private defaultPurpose(itemName: string): string {
+    return this.stripDollarAmounts(itemName ?? 'Grant').slice(0, 30);
+  }
+
+  // Removes dollar-amount substrings (e.g. "$25", "25$", "$25.00") from grant
+  // purpose text. HCB's pre-authorization fraud check reads this text, and a
+  // dollar figure in there that doesn't exactly match the transaction has
+  // been triggering false fraud flags on legitimate grants.
+  private stripDollarAmounts(text: string): string {
+    return text
+      .replace(/\$\s?\d+(?:\.\d{1,2})?/g, '')
+      .replace(/\d+(?:\.\d{1,2})?\s?\$/g, '')
+      .replace(/\s{2,}/g, ' ')
+      .replace(/\s*[-–—:]\s*$/, '')
+      .trim();
   }
 
   /**
@@ -320,7 +328,10 @@ export class HcbService {
     if (!EMAIL_RE.test(email)) {
       throw new BadRequestException('A valid recipient email is required');
     }
-    const purpose = typeof input.purpose === 'string' ? input.purpose.trim().slice(0, 30) : undefined;
+    const purpose =
+      typeof input.purpose === 'string'
+        ? this.stripDollarAmounts(input.purpose.trim()).slice(0, 30)
+        : undefined;
     const merchantLock = this.cleanLock(input.merchantLock);
     const categoryLock = this.cleanLock(input.categoryLock);
     const keywordLock = this.cleanLock(input.keywordLock);
