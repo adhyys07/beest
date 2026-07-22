@@ -90,6 +90,7 @@
 		totalHours: number | null;
 		unifiedDuplicate: boolean;
 		unifiedError: boolean;
+		fileBreakdown: { file: string; hours: number }[];
 	};
 
 	let queue = $state<QueueItem[]>([]);
@@ -111,6 +112,7 @@
 	let submitting = $state(false);
 	let submitError = $state<string | null>(null);
 	let trust = $state<TrustInfo | null>(null);
+	let showHackatimeFiles = $state(false);
 
 	// Audit iframe (heartbeat timeline + anomaly signals).
 	let iframeEl = $state<HTMLIFrameElement | null>(null);
@@ -211,6 +213,7 @@
 		submitError = null;
 		filterInfo = null;
 		trust = null;
+		showHackatimeFiles = false;
 		showIframe = false;
 		iframeError = null;
 		iframeHeight = 560;
@@ -315,7 +318,8 @@
 				emailMismatch: !!j?.emailMismatch,
 				totalHours: typeof j?.totalHours === 'number' ? j.totalHours : null,
 				unifiedDuplicate: !!j?.unifiedDuplicate,
-				unifiedError: !!j?.unifiedError
+				unifiedError: !!j?.unifiedError,
+				fileBreakdown: Array.isArray(j?.fileBreakdown) ? j.fileBreakdown : []
 			};
 		} catch {
 			// Silent — trust panel just won't render.
@@ -454,6 +458,28 @@
 		if (days > 0) return `${days}d ago`;
 		const hrs = Math.floor(ms / 3600000);
 		return hrs > 0 ? `${hrs}h ago` : 'just now';
+	}
+
+	function shortenHackatimePath(path: string): string {
+		if (!path) return path;
+
+		const normalized = path.replace(/\\/g, '/');
+		const parts = normalized.split('/').filter(Boolean);
+		const projectFolderNames = ['beest', 'frontend', 'backend'];
+
+		const rootIndex = parts.findIndex((part) =>
+			projectFolderNames.includes(part.toLowerCase()),
+		);
+
+		if (rootIndex >= 0) {
+			return parts.slice(rootIndex).join('/');
+		}
+
+		if (parts.length <= 4) {
+			return parts.join('/');
+		}
+
+		return parts.slice(-4).join('/');
 	}
 </script>
 
@@ -660,6 +686,37 @@
 								<div class="ht-recorded">
 									<span class="ht-recorded-label">Hackatime recorded</span>
 									<span class="ht-recorded-val">{trust.totalHours.toFixed(1)}<span class="ht-recorded-unit">h</span></span>
+								</div>
+							{/if}
+
+							{#if trust}
+								<div class="ht-files">
+									<div class="ht-files-head">
+										<div class="ht-files-heading">Hours by file</div>
+										<button
+											type="button"
+											class="ht-files-toggle"
+											onclick={() => (showHackatimeFiles = !showHackatimeFiles)}
+											aria-expanded={showHackatimeFiles}
+										>
+											{showHackatimeFiles ? 'Hide' : 'Show'}
+										</button>
+									</div>
+
+									{#if showHackatimeFiles}
+										{#if trust.fileBreakdown.length}
+											<div class="ht-files-list">
+												{#each trust.fileBreakdown as row}
+													<div class="ht-file-row">
+														<span class="ht-file-name" title={row.file}>{shortenHackatimePath(row.file)}</span>
+														<span class="ht-file-hours">{row.hours}h</span>
+													</div>
+												{/each}
+											</div>
+										{:else}
+											<div class="ht-files-empty-text">No file-level breakdown available from Hackatime.</div>
+										{/if}
+									{/if}
 								</div>
 							{/if}
 							<label class="fl" for="hrs">user-facing hours <span class="muted">(final cumulative total for this project — drives pipes)</span></label>
@@ -1102,6 +1159,80 @@
 		font-variant-numeric: tabular-nums;
 	}
 	.ht-recorded-unit { font-size: 1.1rem; font-weight: 600; color: var(--text-muted); margin-left: 0.1rem; }
+
+	.ht-files {
+		margin-top: 0.25rem;
+		padding: 0.9rem 1rem;
+		border: 1px solid var(--border);
+		border-radius: 0.4rem;
+		background: var(--surface-2);
+	}
+
+	.ht-files-head {
+		display: flex;
+		align-items: center;
+		justify-content: space-between;
+		gap: 1rem;
+	}
+
+	.ht-files-heading {
+		font-size: 0.7rem;
+		font-weight: 700;
+		text-transform: uppercase;
+		letter-spacing: 0.06em;
+		color: var(--text-muted);
+	}
+
+	.ht-files-toggle {
+		border: 1px solid var(--border);
+		background: var(--surface);
+		color: var(--text);
+		padding: 0.28rem 0.65rem;
+		border-radius: 0.35rem;
+		font: inherit;
+		font-size: 0.78rem;
+		text-transform: uppercase;
+		letter-spacing: 0.05em;
+		cursor: pointer;
+	}
+
+	.ht-files-toggle:hover {
+		background: var(--surface-2);
+	}
+
+	.ht-file-row {
+		display: flex;
+		justify-content: space-between;
+		gap: 1rem;
+		padding: 0.35rem 0;
+		border-top: 1px solid var(--border);
+	}
+
+	.ht-file-row:first-of-type {
+		border-top: none;
+	}
+
+	.ht-file-name {
+		min-width: 0;
+		overflow-wrap: anywhere;
+		color: var(--text);
+	}
+
+	.ht-file-hours {
+		flex: none;
+		font-variant-numeric: tabular-nums;
+		color: var(--text-muted);
+	}
+
+	.ht-files-list {
+		margin-top: 0.75rem;
+	}
+
+	.ht-files-empty-text {
+		margin-top: 0.75rem;
+		color: var(--text-muted);
+		font-size: 0.85rem;
+	}
 
 	textarea {
 		width: 100%;
