@@ -90,6 +90,7 @@
 		totalHours: number | null;
 		unifiedDuplicate: boolean;
 		unifiedError: boolean;
+		fileBreakdown: { file: string; hours: number }[];
 	};
 
 	let queue = $state<QueueItem[]>([]);
@@ -100,7 +101,7 @@
 	const current = $derived<QueueItem | null>(queue[idx] ?? null);
 
 	// per-project decision state (reset on navigation)
-	let action = $state<'approve' | 'rereview' | 'reject' | 'ban'>('approve');
+	let action = $state<'approve' | 'rereview' | 'reject' | 'hardReject' | 'ban'>('approve');
 	let justification = $state('');
 	let reviewerFeedback = $state('');
 	let userFeedback = $state('');
@@ -111,6 +112,7 @@
 	let submitting = $state(false);
 	let submitError = $state<string | null>(null);
 	let trust = $state<TrustInfo | null>(null);
+	let showHackatimeFiles = $state(false);
 
 	// Audit iframe (heartbeat timeline + anomaly signals).
 	let iframeEl = $state<HTMLIFrameElement | null>(null);
@@ -211,6 +213,7 @@
 		submitError = null;
 		filterInfo = null;
 		trust = null;
+		showHackatimeFiles = false;
 		showIframe = false;
 		iframeError = null;
 		iframeHeight = 560;
@@ -315,7 +318,8 @@
 				emailMismatch: !!j?.emailMismatch,
 				totalHours: typeof j?.totalHours === 'number' ? j.totalHours : null,
 				unifiedDuplicate: !!j?.unifiedDuplicate,
-				unifiedError: !!j?.unifiedError
+				unifiedError: !!j?.unifiedError,
+				fileBreakdown: Array.isArray(j?.fileBreakdown) ? j.fileBreakdown : []
 			};
 		} catch {
 			// Silent — trust panel just won't render.
@@ -418,7 +422,7 @@
 			} else if (action === 'rereview') {
 				body = { action, reviewerFeedback };
 			} else {
-				// reject + ban share the userFeedback payload
+				// reject + hardReject + ban share the userFeedback payload
 				body = { action, userFeedback };
 			}
 			const res = await fetch(`/api/admin/audit/${current.id}/decision`, {
@@ -441,6 +445,7 @@
 	const approveDisabled = $derived(submitting || justification.trim().length < justificationMin || effectiveApproveHours <= 0);
 	const rereviewDisabled = $derived(submitting || reviewerFeedback.trim().length < 10);
 	const rejectDisabled = $derived(submitting || userFeedback.trim().length < 10);
+	const hardRejectDisabled = $derived(submitting || userFeedback.trim().length < 10);
 	const banDisabled = $derived(submitting || userFeedback.trim().length < 10 || !isSuperAdmin);
 
 	function fmtDate(s: string | null): string {
@@ -454,6 +459,28 @@
 		if (days > 0) return `${days}d ago`;
 		const hrs = Math.floor(ms / 3600000);
 		return hrs > 0 ? `${hrs}h ago` : 'just now';
+	}
+
+	function shortenHackatimePath(path: string): string {
+		if (!path) return path;
+
+		const normalized = path.replace(/\\/g, '/');
+		const parts = normalized.split('/').filter(Boolean);
+		const projectFolderNames = ['beest', 'frontend', 'backend'];
+
+		const rootIndex = parts.findIndex((part) =>
+			projectFolderNames.includes(part.toLowerCase()),
+		);
+
+		if (rootIndex >= 0) {
+			return parts.slice(rootIndex).join('/');
+		}
+
+		if (parts.length <= 4) {
+			return parts.join('/');
+		}
+
+		return parts.slice(-4).join('/');
 	}
 </script>
 
@@ -648,6 +675,7 @@
 							<button class:active={action === 'approve'} onclick={() => (action = 'approve')}>Approve</button>
 							<button class:active={action === 'rereview'} onclick={() => (action = 'rereview')}>{current.isOneShot ? 'Release to queue' : 'Send for re-review'}</button>
 							<button class:active={action === 'reject'} onclick={() => (action = 'reject')}>Reject to user</button>
+							<button class:active={action === 'hardReject'} onclick={() => (action = 'hardReject')}>Hard reject</button>
 							{#if isSuperAdmin}
 								<button class:active={action === 'ban'} onclick={() => (action = 'ban')}>Fail &amp; ban</button>
 							{/if}
@@ -660,6 +688,37 @@
 								<div class="ht-recorded">
 									<span class="ht-recorded-label">Hackatime recorded</span>
 									<span class="ht-recorded-val">{trust.totalHours.toFixed(1)}<span class="ht-recorded-unit">h</span></span>
+								</div>
+							{/if}
+
+							{#if trust}
+								<div class="ht-files">
+									<div class="ht-files-head">
+										<div class="ht-files-heading">Hours by file</div>
+										<button
+											type="button"
+											class="ht-files-toggle"
+											onclick={() => (showHackatimeFiles = !showHackatimeFiles)}
+											aria-expanded={showHackatimeFiles}
+										>
+											{showHackatimeFiles ? 'Hide' : 'Show'}
+										</button>
+									</div>
+
+									{#if showHackatimeFiles}
+										{#if trust.fileBreakdown.length}
+											<div class="ht-files-list">
+												{#each trust.fileBreakdown as row}
+													<div class="ht-file-row">
+														<span class="ht-file-name" title={row.file}>{shortenHackatimePath(row.file)}</span>
+														<span class="ht-file-hours">{row.hours}h</span>
+													</div>
+												{/each}
+											</div>
+										{:else}
+											<div class="ht-files-empty-text">No file-level breakdown available from Hackatime.</div>
+										{/if}
+									{/if}
 								</div>
 							{/if}
 							<label class="fl" for="hrs">user-facing hours <span class="muted">(final cumulative total for this project — drives pipes)</span></label>
@@ -751,6 +810,13 @@
 							<textarea id="rj" rows="6" bind:value={userFeedback} placeholder="What does the user need to know?"></textarea>
 							<button class="btn reject" disabled={rejectDisabled} onclick={submit}>
 								{submitting ? 'Submitting…' : 'Reject & send to user'}
+							</button>
+						{:else if action === 'hardReject'}
+							<p class="hint warn">Permanently rejects the project — the builder cannot resubmit it (they can still ship other projects).</p>
+							<label class="fl" for="hj">feedback for the user ({userFeedback.trim().length}/10)</label>
+							<textarea id="hj" rows="6" bind:value={userFeedback} placeholder="What does the user need to know?"></textarea>
+							<button class="btn reject" disabled={hardRejectDisabled} onclick={() => { if (confirm('Hard reject this project? The builder will NOT be able to resubmit it (they can still ship other projects).')) submit(); }}>
+								{submitting ? 'Submitting…' : 'Hard reject & send to user'}
 							</button>
 						{:else}
 							<p class="hint warn">Bans the user and rejects the project. Use sparingly — Super Admin only.</p>
@@ -1102,6 +1168,80 @@
 		font-variant-numeric: tabular-nums;
 	}
 	.ht-recorded-unit { font-size: 1.1rem; font-weight: 600; color: var(--text-muted); margin-left: 0.1rem; }
+
+	.ht-files {
+		margin-top: 0.25rem;
+		padding: 0.9rem 1rem;
+		border: 1px solid var(--border);
+		border-radius: 0.4rem;
+		background: var(--surface-2);
+	}
+
+	.ht-files-head {
+		display: flex;
+		align-items: center;
+		justify-content: space-between;
+		gap: 1rem;
+	}
+
+	.ht-files-heading {
+		font-size: 0.7rem;
+		font-weight: 700;
+		text-transform: uppercase;
+		letter-spacing: 0.06em;
+		color: var(--text-muted);
+	}
+
+	.ht-files-toggle {
+		border: 1px solid var(--border);
+		background: var(--surface);
+		color: var(--text);
+		padding: 0.28rem 0.65rem;
+		border-radius: 0.35rem;
+		font: inherit;
+		font-size: 0.78rem;
+		text-transform: uppercase;
+		letter-spacing: 0.05em;
+		cursor: pointer;
+	}
+
+	.ht-files-toggle:hover {
+		background: var(--surface-2);
+	}
+
+	.ht-file-row {
+		display: flex;
+		justify-content: space-between;
+		gap: 1rem;
+		padding: 0.35rem 0;
+		border-top: 1px solid var(--border);
+	}
+
+	.ht-file-row:first-of-type {
+		border-top: none;
+	}
+
+	.ht-file-name {
+		min-width: 0;
+		overflow-wrap: anywhere;
+		color: var(--text);
+	}
+
+	.ht-file-hours {
+		flex: none;
+		font-variant-numeric: tabular-nums;
+		color: var(--text-muted);
+	}
+
+	.ht-files-list {
+		margin-top: 0.75rem;
+	}
+
+	.ht-files-empty-text {
+		margin-top: 0.75rem;
+		color: var(--text-muted);
+		font-size: 0.85rem;
+	}
 
 	textarea {
 		width: 100%;

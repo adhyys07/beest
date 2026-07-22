@@ -21,7 +21,7 @@ import { IframeContextService } from './iframe-context.service';
 import { AdminService } from './admin.service';
 import { Inject, forwardRef } from '@nestjs/common';
 
-export type AuditAction = 'approve' | 'rereview' | 'reject' | 'ban';
+export type AuditAction = 'approve' | 'rereview' | 'reject' | 'hardReject' | 'ban';
 
 export interface AuditDecisionDto {
   action: AuditAction;
@@ -37,7 +37,7 @@ export interface AuditDecisionDto {
   combineWithFirstPass?: boolean;
   // rereview (feedback to the first reviewer, internal)
   reviewerFeedback?: string | null;
-  // reject + ban (feedback to the user)
+  // reject + hardReject + ban (feedback to the user)
   userFeedback?: string | null;
   // ban only: caller must be Super Admin — the controller passes this through
   // from the resolved request perms so the service can refuse non-SA bans.
@@ -418,6 +418,8 @@ export class AuditService {
         return this.returnForReReview(project, submission, superAdminId, dto);
       case 'reject':
         return this.reject(project, submission, superAdminId, dto);
+      case 'hardReject':
+        return this.hardReject(project, submission, superAdminId, dto);
       case 'ban':
         return this.banFromAudit(project, superAdminId, dto);
       default:
@@ -739,6 +741,55 @@ export class AuditService {
       `Project "${project.name}" received feedback`,
     );
     this.logger.log(`Second-pass rejected project ${project.id}`);
+    return { success: true };
+  }
+
+  /** Hard reject — terminal 'rejected' status. Unlike `reject` (changes_needed),
+   *  the builder cannot resubmit this project (see projects.service's rejected
+   *  guard); they can still ship other projects. */
+  private async hardReject(
+    project: Project,
+    submission: Submission | null,
+    superAdminId: string,
+    dto: AuditDecisionDto,
+  ): Promise<{ success: true }> {
+    const feedback = (dto.userFeedback ?? '').trim();
+    if (feedback.length < 10) {
+      throw new BadRequestException(
+        'Rejection feedback for the user must be at least 10 characters.',
+      );
+    }
+
+    project.status = 'rejected';
+    project.overrideHours = 0;
+    project.internalHours = 0;
+    project.isGolden = false;
+    await this.projectRepo.save(project);
+
+    if (submission && submission.status !== 'rejected') {
+      submission.status = 'rejected';
+      submission.overrideHours = 0;
+      submission.internalHours = 0;
+      await this.submissionRepo.save(submission);
+    }
+
+    const review = this.reviewRepo.create({
+      projectId: project.id,
+      reviewerId: superAdminId,
+      submissionId: submission?.id ?? null,
+      status: 'rejected',
+      feedback,
+      internalNote: 'Hard-rejected at second-pass review',
+      overrideJustification: null,
+    });
+    await this.reviewRepo.save(review);
+
+    await this.auditLogService.log(
+      project.userId,
+      'project_reviewed',
+      `Project "${project.name}" was rejected`,
+    );
+    this.logger.log(`Second-pass hard-rejected project ${project.id}`);
     return { success: true };
   }
 
