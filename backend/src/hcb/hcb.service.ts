@@ -278,15 +278,20 @@ export class HcbService {
     return {
       recipientEmail: order.user?.email ?? '',
       suggestedAmountCents: suggested,
-      purpose: this.defaultPurpose(order.itemName),
+      purpose: this.defaultPurpose(),
       orgId: this.orgId,
       alreadyGranted: !!order.hcbCardGrantId,
       existingGrantId: order.hcbCardGrantId,
     };
   }
 
-  private defaultPurpose(itemName: string): string {
-    return (itemName ?? 'Grant').slice(0, 30);
+  // Deliberately does NOT use the order's item name: shop item names often
+  // carry a price (e.g. "$25 Amazon Gift Card"), and HCB's pre-authorization
+  // fraud check reads this purpose text — a dollar figure in there that
+  // doesn't exactly match the transaction has been triggering false fraud
+  // flags on legitimate grants. Keep this generic and price-free.
+  private defaultPurpose(): string {
+    return 'Beest shop reward';
   }
 
   /**
