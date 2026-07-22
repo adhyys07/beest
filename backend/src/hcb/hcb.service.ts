@@ -29,11 +29,9 @@ export type CardGrantInput = {
   merchantLock?: string | null;
   categoryLock?: string | null;
   keywordLock?: string | null;
-  // One-time-use locks the grant to a single transaction and defaults ON.
-  // Pre-authorization requires the recipient to be approved before the card
-  // activates; it defaults OFF because HCB's pre-auth hold shows an unrelated
-  // dollar amount to the recipient's bank, which has caused real grants to be
-  // flagged as fraudulent — an admin must opt in explicitly per grant.
+  // Both default ON when omitted. One-time-use locks the grant to a single
+  // transaction; pre-authorization requires the recipient to be approved
+  // before the card activates.
   oneTimeUse?: boolean;
   preAuthorizationRequired?: boolean;
 };
@@ -288,7 +286,18 @@ export class HcbService {
   }
 
   private defaultPurpose(itemName: string): string {
-    return (itemName ?? 'Grant').slice(0, 30);
+    return this.stripDollarAmounts(itemName ?? 'Grant').slice(0, 30);
+  }
+
+  // Removes dollar-amount substrings (e.g. "$25", "25$", "$25.00") from grant
+  // instruction text — see createCardGrantForOrder for why.
+  private stripDollarAmounts(text: string): string {
+    return text
+      .replace(/\$\s?\d+(?:\.\d{1,2})?/g, '')
+      .replace(/\d+(?:\.\d{1,2})?\s?\$/g, '')
+      .replace(/\s{2,}/g, ' ')
+      .replace(/\s*[-–—:]\s*$/, '')
+      .trim();
   }
 
   /**
@@ -317,16 +326,20 @@ export class HcbService {
     if (!EMAIL_RE.test(email)) {
       throw new BadRequestException('A valid recipient email is required');
     }
-    const purpose = typeof input.purpose === 'string' ? input.purpose.trim().slice(0, 30) : undefined;
+    // Strip any dollar amount from the purpose text: HCB's pre-authorization
+    // fraud check reads the grant description, and a dollar figure in there
+    // that doesn't exactly match the transaction has been triggering false
+    // fraud flags on legitimate grants.
+    const purpose =
+      typeof input.purpose === 'string'
+        ? this.stripDollarAmounts(input.purpose.trim()).slice(0, 30)
+        : undefined;
     const merchantLock = this.cleanLock(input.merchantLock);
     const categoryLock = this.cleanLock(input.categoryLock);
     const keywordLock = this.cleanLock(input.keywordLock);
-    // One-time-use defaults ON; only an explicit `false` disables it.
-    // Pre-authorization defaults OFF — only an explicit `true` enables it — since
-    // HCB's pre-auth hold shows the recipient's bank an unrelated dollar amount,
-    // which has caused legitimate grants to be flagged as fraudulent.
+    // Default both protections ON; only an explicit `false` disables them.
     const oneTimeUse = input.oneTimeUse !== false;
-    const preAuthorizationRequired = input.preAuthorizationRequired === true;
+    const preAuthorizationRequired = input.preAuthorizationRequired !== false;
 
     const amountCents = input.amountCents;
     if (!Number.isInteger(amountCents) || amountCents <= 0) {
