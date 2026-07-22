@@ -455,7 +455,7 @@ export class AdminController {
     },
     @Req() req: Request,
   ) {
-    const validActions = ['approve', 'rereview', 'reject', 'ban'];
+    const validActions = ['approve', 'rereview', 'reject', 'hardReject', 'ban'];
     if (!body.action || !validActions.includes(body.action)) {
       throw new BadRequestException(
         `action must be one of: ${validActions.join(', ')}`,

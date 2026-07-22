@@ -101,7 +101,7 @@
 	const current = $derived<QueueItem | null>(queue[idx] ?? null);
 
 	// per-project decision state (reset on navigation)
-	let action = $state<'approve' | 'rereview' | 'reject' | 'ban'>('approve');
+	let action = $state<'approve' | 'rereview' | 'reject' | 'hardReject' | 'ban'>('approve');
 	let justification = $state('');
 	let reviewerFeedback = $state('');
 	let userFeedback = $state('');
@@ -422,7 +422,7 @@
 			} else if (action === 'rereview') {
 				body = { action, reviewerFeedback };
 			} else {
-				// reject + ban share the userFeedback payload
+				// reject + hardReject + ban share the userFeedback payload
 				body = { action, userFeedback };
 			}
 			const res = await fetch(`/api/admin/audit/${current.id}/decision`, {
@@ -445,6 +445,7 @@
 	const approveDisabled = $derived(submitting || justification.trim().length < justificationMin || effectiveApproveHours <= 0);
 	const rereviewDisabled = $derived(submitting || reviewerFeedback.trim().length < 10);
 	const rejectDisabled = $derived(submitting || userFeedback.trim().length < 10);
+	const hardRejectDisabled = $derived(submitting || userFeedback.trim().length < 10);
 	const banDisabled = $derived(submitting || userFeedback.trim().length < 10 || !isSuperAdmin);
 
 	function fmtDate(s: string | null): string {
@@ -674,6 +675,7 @@
 							<button class:active={action === 'approve'} onclick={() => (action = 'approve')}>Approve</button>
 							<button class:active={action === 'rereview'} onclick={() => (action = 'rereview')}>{current.isOneShot ? 'Release to queue' : 'Send for re-review'}</button>
 							<button class:active={action === 'reject'} onclick={() => (action = 'reject')}>Reject to user</button>
+							<button class:active={action === 'hardReject'} onclick={() => (action = 'hardReject')}>Hard reject</button>
 							{#if isSuperAdmin}
 								<button class:active={action === 'ban'} onclick={() => (action = 'ban')}>Fail &amp; ban</button>
 							{/if}
@@ -808,6 +810,13 @@
 							<textarea id="rj" rows="6" bind:value={userFeedback} placeholder="What does the user need to know?"></textarea>
 							<button class="btn reject" disabled={rejectDisabled} onclick={submit}>
 								{submitting ? 'Submitting…' : 'Reject & send to user'}
+							</button>
+						{:else if action === 'hardReject'}
+							<p class="hint warn">Permanently rejects the project — the builder cannot resubmit it (they can still ship other projects).</p>
+							<label class="fl" for="hj">feedback for the user ({userFeedback.trim().length}/10)</label>
+							<textarea id="hj" rows="6" bind:value={userFeedback} placeholder="What does the user need to know?"></textarea>
+							<button class="btn reject" disabled={hardRejectDisabled} onclick={() => { if (confirm('Hard reject this project? The builder will NOT be able to resubmit it (they can still ship other projects).')) submit(); }}>
+								{submitting ? 'Submitting…' : 'Hard reject & send to user'}
 							</button>
 						{:else}
 							<p class="hint warn">Bans the user and rejects the project. Use sparingly — Super Admin only.</p>
