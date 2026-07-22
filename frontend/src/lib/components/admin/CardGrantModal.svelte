@@ -193,7 +193,7 @@
 			</label>
 
 			<label class="cg-field">
-				<span>Purpose (≤30 chars) <span class="cg-hint">— any dollar amount is stripped automatically, don't rely on it appearing</span></span>
+				<span>Purpose (≤30 chars) <span class="cg-hint">— avoid mentioning a dollar amount, HCB's pre-auth fraud check reads this and flags legitimate grants when it doesn't match</span></span>
 				<input type="text" bind:value={purpose} maxlength="30" />
 				</label>
 
