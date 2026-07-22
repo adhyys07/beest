@@ -31,9 +31,11 @@
 	let amountDollars = $state('');
 	let email = $state('');
 	let purpose = $state('');
-	// Both protections default ON; admin can opt out per grant.
+	// One-time-use defaults ON; admin can opt out per grant. Pre-authorization
+	// defaults OFF — HCB's pre-auth hold shows an unrelated dollar amount to the
+	// recipient's bank, which has caused real grants to be flagged as fraudulent.
 	let oneTimeUse = $state(true);
-	let preAuthorizationRequired = $state(true);
+	let preAuthorizationRequired = $state(false);
 
 	let submitting = $state(false);
 	let submitError = $state('');
@@ -204,7 +206,7 @@
 
 				<label class="cg-check">
 					<input type="checkbox" bind:checked={preAuthorizationRequired} />
-					<span>Require pre-authorization <span class="cg-hint">— recipient must be approved before the card activates</span></span>
+					<span>Require pre-authorization <span class="cg-hint">— recipient must be approved before the card activates. HCB shows an unrelated dollar amount for this hold, which has triggered bank fraud flags — leave off unless you need it</span></span>
 			</label>
 
 			{#if submitError}
