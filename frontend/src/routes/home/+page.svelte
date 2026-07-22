@@ -2036,9 +2036,7 @@
           <div class="in-review-notice">
             <p class="in-review-text">This project is currently in review. You can still work on it and track hours, but you can't resubmit until it's been reviewed.</p>
             {#if editingProjectQueue}
-              <p class="in-review-queue">
-                Queue position: <strong>{editingProjectQueue.position}</strong> of <strong>{editingProjectQueue.total}</strong>
-              </p>
+             
             {/if}
             <button class="form-btn-draft" onclick={() => convertToDraft(editingProject.id)}>
               Convert to Draft
