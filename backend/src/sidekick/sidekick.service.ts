@@ -23,6 +23,7 @@ import { HackatimeService } from '../hackatime/hackatime.service';
 import { HcaService } from '../hca/hca.service';
 import { LapseService, TimelapseDTO } from '../lapse/lapse.service';
 import { ShopService } from '../shop/shop.service';
+import { SlackService } from '../slack/slack.service';
 import {
   actorIdFor,
   decodeCursor,
@@ -85,6 +86,7 @@ export class SidekickService {
     private readonly auditLogService: AuditLogService,
     private readonly hackatimeService: HackatimeService,
     private readonly lapseService: LapseService,
+    private readonly slackService: SlackService,
   ) {}
 
   // ── Health / stats ──────────────────────────────────────────────────────
@@ -631,7 +633,7 @@ export class SidekickService {
         // little or nothing.
         const authorizationNote = [
           input.justification?.trim() || null,
-          `Project was authorized by @/${displayHandle(reviewer)} on ${ymd(new Date())} after a second-pass review.`,
+          `Project was authorized by ${await this.staffCredit(reviewer)} on ${ymd(new Date())} after a second-pass review.`,
         ]
           .filter(Boolean)
           .join('\n\n');
@@ -1054,12 +1056,13 @@ export class SidekickService {
       : new Date(`${HACKATIME_EVENT_START}T00:00:00.000Z`);
     const shippedAt = submission.createdAt ?? new Date();
 
-    const [facts, timelapses] = await Promise.all([
+    const [facts, timelapses, reviewerCredit] = await Promise.all([
       this.adminService.getJustificationFacts(project, windowStart),
       this.lapseService.findForProject(
         project.user?.email ?? '',
         project.hackatimeProjectName ?? [],
       ),
+      this.staffCredit(reviewer),
     ]);
 
     const adjusted = fmtHoursMinutes(hoursAssigned * 3600);
@@ -1086,7 +1089,7 @@ export class SidekickService {
       ? `The Hackatime projects submitted were: ${htNames.join(', ')} and included time from ${ymd(windowStart)} to ${ymd(shippedAt)}`
       : null;
 
-    const reviewedLine = `Project was reviewed by @/${displayHandle(reviewer)} on ${ymd(new Date())}.`;
+    const reviewedLine = `Project was reviewed by ${reviewerCredit} on ${ymd(new Date())}.`;
 
     const lapseBlock = timelapses.length
       ? [
@@ -1100,6 +1103,19 @@ export class SidekickService {
     return [header, justification.trim(), shipLine, htLine, reviewedLine, lapseBlock]
       .filter(Boolean)
       .join('\n\n');
+  }
+
+  /**
+   * Staff credit for justification lines: the real name, with the Slack
+   * username when it resolves — `Orpheus (@orpheus)`. Best-effort: an
+   * unresolvable username just omits the parenthetical.
+   */
+  private async staffCredit(reviewer: User): Promise<string> {
+    const name = reviewer.name || reviewer.nickname || 'unknown';
+    const username = reviewer.slackId
+      ? await this.slackService.getUserUsername(reviewer.slackId)
+      : null;
+    return username ? `${name} (@${username})` : name;
   }
 
   /** Incoming actor IDs are a Slack ID or an HCA identity ID. */

@@ -41,6 +41,9 @@ const buildService = () => {
     findForProject: jest.fn().mockResolvedValue([]),
     timelapsePageUrl: jest.fn((id: string) => `https://lapse.hackclub.com/timelapse/${id}`),
   };
+  const slackService = {
+    getUserUsername: jest.fn().mockResolvedValue(null),
+  };
 
   const service = new SidekickService(
     projectRepo as never,
@@ -58,6 +61,7 @@ const buildService = () => {
     auditLogService as never,
     hackatimeService as never,
     lapseService as never,
+    slackService as never,
   );
 
   return {
@@ -73,6 +77,7 @@ const buildService = () => {
     auditLogService,
     hackatimeService,
     lapseService,
+    slackService,
   };
 };
 
@@ -250,6 +255,7 @@ describe('SidekickService.submitReviewAction', () => {
     const s = buildService();
     wireReviewFixtures(s);
     s.userRepo.findOne.mockResolvedValue({ ...reviewer, name: 'Orpheus' });
+    s.slackService.getUserUsername.mockResolvedValue('orpheus');
     s.projectRepo.findOne.mockResolvedValue({
       id: 'proj-1',
       status: 'unreviewed',
@@ -279,7 +285,9 @@ describe('SidekickService.submitReviewAction', () => {
     expect(justification).toContain(
       'The Hackatime projects submitted were: cx, cx-v2 and included time from 2026-04-02 to 2026-07-08',
     );
-    expect(justification).toContain(`Project was reviewed by @/Orpheus on ${today}.`);
+    // Reviewer credit: real name plus the Slack username, no @/ prefix.
+    expect(justification).toContain(`Project was reviewed by Orpheus (@orpheus) on ${today}.`);
+    expect(s.slackService.getUserUsername).toHaveBeenCalledWith('U999');
     // First ship of the project → no re-ship framing.
     expect(justification).not.toContain('reshipped');
     expect(justification).not.toContain('update to an existing project');
@@ -379,7 +387,8 @@ describe('SidekickService.submitReviewAction', () => {
       'This ship was assigned 5h 0min after review.\n\n' +
         'checked commits\n\n' +
         'Project was submitted by @/unknown on 2026-07-08\n\n' +
-        `Project was reviewed by @/unknown on ${today}.`,
+        // No Slack username resolved → the credit is the bare name.
+        `Project was reviewed by unknown on ${today}.`,
     );
   });
 
@@ -489,7 +498,7 @@ describe('SidekickService.submitReviewAction', () => {
     expect(dto.combineWithFirstPass).toBe(true);
     expect(dto.justification).toBe(
       'Spot-checked the commit history against Hackatime logs.\n\n' +
-        `Project was authorized by @/unknown on ${today} after a second-pass review.`,
+        `Project was authorized by unknown on ${today} after a second-pass review.`,
     );
   });
 
@@ -497,6 +506,7 @@ describe('SidekickService.submitReviewAction', () => {
     const s = buildService();
     wireReviewFixtures(s, { projectStatus: 'fraud_pending' });
     s.userRepo.findOne.mockResolvedValue({ ...reviewer, nickname: 'iamalive' });
+    s.slackService.getUserUsername.mockResolvedValue('iamalive2');
     await s.service.submitReviewAction({
       shipId: 'sub-1',
       reviewerId: 'U999',
@@ -505,7 +515,7 @@ describe('SidekickService.submitReviewAction', () => {
     const today = new Date().toISOString().split('T')[0];
     const dto = s.auditService.decide.mock.calls[0][2];
     expect(dto.justification).toBe(
-      `Project was authorized by @/iamalive on ${today} after a second-pass review.`,
+      `Project was authorized by iamalive (@iamalive2) on ${today} after a second-pass review.`,
     );
     expect(dto.justification.length).toBeGreaterThanOrEqual(50);
   });

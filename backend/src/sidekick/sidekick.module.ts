@@ -14,6 +14,7 @@ import { HackatimeModule } from '../hackatime/hackatime.module';
 import { HcaModule } from '../hca/hca.module';
 import { LapseModule } from '../lapse/lapse.module';
 import { ShopModule } from '../shop/shop.module';
+import { SlackModule } from '../slack/slack.module';
 import { SidekickAuthGuard } from './sidekick-auth.guard';
 import { SidekickController } from './sidekick.controller';
 import { SidekickService } from './sidekick.service';
@@ -36,6 +37,7 @@ import { SidekickService } from './sidekick.service';
     AuditLogModule,
     HackatimeModule,
     LapseModule,
+    SlackModule,
   ],
   controllers: [SidekickController],
   providers: [SidekickService, SidekickAuthGuard],
