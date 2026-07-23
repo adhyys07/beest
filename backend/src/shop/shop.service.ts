@@ -7,6 +7,7 @@ import {
   Logger,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
+import { ConfigService } from '@nestjs/config';
 import { Repository, DataSource, In } from 'typeorm';
 import { ShopItem } from '../entities/shop-item.entity';
 import { Project } from '../entities/project.entity';
@@ -18,6 +19,7 @@ import { ShopSuggestionVote } from '../entities/shop-suggestion-vote.entity';
 import { AuditLogService } from '../audit-log/audit-log.service';
 import { RsvpService } from '../rsvp/rsvp.service';
 import { SlackNotifyService } from '../slack/slack-notify.service';
+import { AttendService } from '../attend/attend.service';
 import {
   orderPendingDm,
   orderFulfilledDm,
@@ -59,6 +61,8 @@ export class ShopService {
     private readonly auditLogService: AuditLogService,
     private readonly rsvpService: RsvpService,
     private readonly slackNotify: SlackNotifyService,
+    private readonly attendService: AttendService,
+    private readonly configService: ConfigService,
   ) {}
 
   /** Fire-and-forget order-status DM to the buyer (best-effort). */
@@ -342,6 +346,17 @@ export class ShopService {
       this.userRepo.findOne({ where: { id: userId }, select: ['email'] }).then((u) => {
         if (u?.email) this.rsvpService.updateDateField(u.email, 'Loops - beestPurchasedItem');
       });
+
+      // Ticket item purchased — invite the buyer to the in-person event on Attend.
+      const ticketItemId = this.configService.get<string>('ATTEND_TICKET_SHOP_ITEM_ID');
+      if (ticketItemId && shopItemId === ticketItemId) {
+        this.userRepo
+          .findOne({ where: { id: userId }, select: ['email', 'name'] })
+          .then((u) => {
+            if (u?.email) return this.attendService.inviteParticipant(u.email, u.name);
+          })
+          .catch(() => undefined);
+      }
 
       this.notifyOrder(
         userId,
