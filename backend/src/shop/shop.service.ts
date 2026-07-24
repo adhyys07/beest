@@ -7,6 +7,7 @@ import {
   Logger,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
+import { ConfigService } from '@nestjs/config';
 import { Repository, DataSource, In } from 'typeorm';
 import { ShopItem } from '../entities/shop-item.entity';
 import { Project } from '../entities/project.entity';
@@ -18,6 +19,7 @@ import { ShopSuggestionVote } from '../entities/shop-suggestion-vote.entity';
 import { AuditLogService } from '../audit-log/audit-log.service';
 import { RsvpService } from '../rsvp/rsvp.service';
 import { SlackNotifyService } from '../slack/slack-notify.service';
+import { AttendService } from '../attend/attend.service';
 import {
   orderPendingDm,
   orderFulfilledDm,
@@ -59,6 +61,8 @@ export class ShopService {
     private readonly auditLogService: AuditLogService,
     private readonly rsvpService: RsvpService,
     private readonly slackNotify: SlackNotifyService,
+    private readonly attendService: AttendService,
+    private readonly configService: ConfigService,
   ) {}
 
   /** Fire-and-forget order-status DM to the buyer (best-effort). */
@@ -74,6 +78,31 @@ export class ShopService {
         }
       })
       .catch(() => undefined);
+  }
+
+  /**
+   * Surfaces an Attend invite failure loudly: an audit-log entry (searchable
+   * in the admin UI against the buyer) plus, if ATTEND_ALERT_SLACK_ID is set,
+   * a direct Slack DM so someone actually sees it instead of it sitting in a
+   * log file.
+   */
+  private async alertAttendInviteFailure(
+    userId: string,
+    email: string,
+  ): Promise<void> {
+    await this.auditLogService.log(
+      userId,
+      'attend_invite_failed',
+      `Attend invite failed for ${email} — needs manual follow-up`,
+    );
+
+    const alertSlackId = this.configService.get<string>('ATTEND_ALERT_SLACK_ID');
+    if (alertSlackId) {
+      await this.slackNotify.dm(
+        alertSlackId,
+        `Attend invite failed for ${email} after retries — they bought a ticket but weren't invited. Needs manual invite.`,
+      );
+    }
   }
 
   // ── Shop suggestions ──
@@ -342,6 +371,23 @@ export class ShopService {
       this.userRepo.findOne({ where: { id: userId }, select: ['email'] }).then((u) => {
         if (u?.email) this.rsvpService.updateDateField(u.email, 'Loops - beestPurchasedItem');
       });
+
+      // Ticket item purchased — invite the buyer to the in-person event on Attend.
+      // A failed invite means a paying participant won't get into the event, so
+      // failures (after AttendService's own retries) must be surfaced loudly:
+      // an audit-log entry (visible/searchable in the admin UI) plus a direct
+      // Slack DM, rather than just a swallowed log line.
+      const ticketItemId = this.configService.get<string>('ATTEND_TICKET_SHOP_ITEM_ID');
+      if (ticketItemId && shopItemId === ticketItemId) {
+        this.userRepo
+          .findOne({ where: { id: userId }, select: ['email', 'name'] })
+          .then(async (u) => {
+            if (!u?.email) return;
+            const invited = await this.attendService.inviteParticipant(u.email, u.name);
+            if (!invited) await this.alertAttendInviteFailure(userId, u.email);
+          })
+          .catch(() => undefined);
+      }
 
       this.notifyOrder(
         userId,

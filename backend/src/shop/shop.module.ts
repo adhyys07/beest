@@ -4,6 +4,7 @@ import { AuthModule } from '../auth/auth.module';
 import { AuditLogModule } from '../audit-log/audit-log.module';
 import { RsvpModule } from '../rsvp/rsvp.module';
 import { SlackModule } from '../slack/slack.module';
+import { AttendModule } from '../attend/attend.module';
 import { ShopItem } from '../entities/shop-item.entity';
 import { Order } from '../entities/order.entity';
 import { FulfillmentUpdate } from '../entities/fulfillment-update.entity';
@@ -20,6 +21,7 @@ import { ShopService } from './shop.service';
     AuditLogModule,
     RsvpModule,
     SlackModule,
+    AttendModule,
   ],
   controllers: [ShopController],
   providers: [ShopService],
