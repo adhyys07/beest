@@ -30,10 +30,17 @@ export class AttendService {
     }
   }
 
+  private static readonly MAX_ATTEMPTS = 3;
+  private static readonly RETRY_DELAY_MS = 1000;
+
   /**
    * Invites a participant to the Attend event by email. A 409 (already
    * invited/registered) counts as success — the goal (an invite exists)
-   * already holds. Returns false on any other failure or when unconfigured.
+   * already holds. Retries transient failures (network errors, non-409
+   * non-2xx responses) up to MAX_ATTEMPTS times before giving up. Returns
+   * false only once every attempt has failed, or when unconfigured — the
+   * caller is responsible for surfacing that loudly, since a false here
+   * means a paying participant did not get invited.
    */
   async inviteParticipant(
     email: string,
@@ -47,32 +54,42 @@ export class AttendService {
       .filter(Boolean);
     const lastName = rest.join(' ');
 
-    try {
-      const res = await fetchWithTimeout(
-        `${this.baseUrl}/api/v1/events/${this.eventSlug}/participants`,
-        {
-          method: 'POST',
-          headers: {
-            Authorization: `Bearer ${this.apiKey}`,
-            'Content-Type': 'application/json',
+    let lastError = '';
+    for (let attempt = 1; attempt <= AttendService.MAX_ATTEMPTS; attempt++) {
+      try {
+        const res = await fetchWithTimeout(
+          `${this.baseUrl}/api/v1/events/${this.eventSlug}/participants`,
+          {
+            method: 'POST',
+            headers: {
+              Authorization: `Bearer ${this.apiKey}`,
+              'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({
+              email,
+              ...(firstName ? { first_name: firstName } : {}),
+              ...(lastName ? { last_name: lastName } : {}),
+            }),
           },
-          body: JSON.stringify({
-            email,
-            ...(firstName ? { first_name: firstName } : {}),
-            ...(lastName ? { last_name: lastName } : {}),
-          }),
-        },
-      );
+        );
 
-      if (res.ok || res.status === 409) return true;
+        if (res.ok || res.status === 409) return true;
 
-      this.logger.error(`Attend invite HTTP ${res.status} for ${email}`);
-      return false;
-    } catch (err) {
-      this.logger.error(
-        `Attend invite request failed for ${email}: ${err instanceof Error ? err.message : String(err)}`,
-      );
-      return false;
+        lastError = `HTTP ${res.status}`;
+      } catch (err) {
+        lastError = err instanceof Error ? err.message : String(err);
+      }
+
+      if (attempt < AttendService.MAX_ATTEMPTS) {
+        await new Promise((r) =>
+          setTimeout(r, AttendService.RETRY_DELAY_MS * attempt),
+        );
+      }
     }
+
+    this.logger.error(
+      `Attend invite failed for ${email} after ${AttendService.MAX_ATTEMPTS} attempts: ${lastError}`,
+    );
+    return false;
   }
 }

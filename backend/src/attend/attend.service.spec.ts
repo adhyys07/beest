@@ -68,7 +68,8 @@ describe('AttendService', () => {
     expect(result).toBe(true);
   });
 
-  it('returns false on other HTTP errors', async () => {
+  it('retries on HTTP error and returns false only after exhausting all attempts', async () => {
+    jest.useFakeTimers();
     mockFetch.mockResolvedValue({ ok: false, status: 422 });
     const service = new AttendService(
       makeConfig({
@@ -77,11 +78,38 @@ describe('AttendService', () => {
       }),
     );
 
-    const result = await service.inviteParticipant('bad-email');
+    const resultPromise = service.inviteParticipant('bad-email');
+    await jest.runAllTimersAsync();
+    const result = await resultPromise;
+
     expect(result).toBe(false);
+    expect(mockFetch).toHaveBeenCalledTimes(3);
+    jest.useRealTimers();
   });
 
-  it('returns false when the request throws', async () => {
+  it('retries after a transient failure and succeeds', async () => {
+    jest.useFakeTimers();
+    mockFetch
+      .mockRejectedValueOnce(new Error('network down'))
+      .mockResolvedValueOnce({ ok: true, status: 201 });
+    const service = new AttendService(
+      makeConfig({
+        ATTEND_API_KEY: 'secret-key',
+        ATTEND_EVENT_SLUG: 'beest',
+      }),
+    );
+
+    const resultPromise = service.inviteParticipant('person@example.com');
+    await jest.runAllTimersAsync();
+    const result = await resultPromise;
+
+    expect(result).toBe(true);
+    expect(mockFetch).toHaveBeenCalledTimes(2);
+    jest.useRealTimers();
+  });
+
+  it('returns false when every attempt throws', async () => {
+    jest.useFakeTimers();
     mockFetch.mockRejectedValue(new Error('network down'));
     const service = new AttendService(
       makeConfig({
@@ -90,7 +118,12 @@ describe('AttendService', () => {
       }),
     );
 
-    const result = await service.inviteParticipant('person@example.com');
+    const resultPromise = service.inviteParticipant('person@example.com');
+    await jest.runAllTimersAsync();
+    const result = await resultPromise;
+
     expect(result).toBe(false);
+    expect(mockFetch).toHaveBeenCalledTimes(3);
+    jest.useRealTimers();
   });
 });
