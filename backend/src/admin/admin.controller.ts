@@ -24,6 +24,7 @@ import { AuthService } from '../auth/auth.service';
 import { ShopService } from '../shop/shop.service';
 import { DevlogsService } from '../devlogs/devlogs.service';
 import { LookoutService } from '../lookout/lookout.service';
+import { AttendService } from '../attend/attend.service';
 
 @Controller('api/admin')
 export class AdminController {
@@ -35,6 +36,7 @@ export class AdminController {
     private readonly shopService: ShopService,
     private readonly devlogsService: DevlogsService,
     private readonly lookoutService: LookoutService,
+    private readonly attendService: AttendService,
   ) {}
 
   @UseGuards(FulfillerGuard)
@@ -147,6 +149,33 @@ export class AdminController {
     await this.auditLogService.log(id, 'admin_impersonate', `Admin ${adminName} started impersonating this account`);
 
     return this.authService.issueImpersonationToken(id, adminUid, adminName);
+  }
+
+  // Manual escape hatch for AttendService.inviteParticipant failures (see
+  // ShopService.alertAttendInviteFailure) — lets a Super Admin retry from the
+  // user panel instead of needing DB/console access.
+  @UseGuards(SuperAdminGuard)
+  @Post('users/:id/attend-invite')
+  async sendAttendInvite(@Param('id', ParseUUIDPipe) id: string) {
+    const targetUser = await this.adminService.getUser(id);
+    if (!targetUser.email) {
+      throw new BadRequestException('User has no email on file');
+    }
+
+    const invited = await this.attendService.inviteParticipant(
+      targetUser.email,
+      targetUser.name,
+    );
+
+    await this.auditLogService.log(
+      id,
+      invited ? 'attend_invite_manual' : 'attend_invite_failed',
+      invited
+        ? `Admin manually sent an Attend invite to ${targetUser.email}`
+        : `Attend invite failed for ${targetUser.email} — needs manual follow-up`,
+    );
+
+    return { success: invited };
   }
 
   @UseGuards(FulfillerGuard)
