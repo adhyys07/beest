@@ -60,6 +60,8 @@
 		Both: 'Hackathon + Shop',
 	};
 
+	const GRANT_VALUE_RE = /\$\s*(\d+(?:\.\d{1,2})?)/;
+
 	// Fulfiller is reviewer-tier for the tab layout (Projects + Leaderboard, none
 	// of the Super-Admin-only tabs), but additionally gets the Fulfillment tab via
 	// canFulfill below. It has no audit access.
@@ -189,6 +191,8 @@
 		claimedByReviewerId: string | null;
 		claimedByReviewerName: string | null;
 		claimedAt: string | null;
+		joeProfileUrl: string | null;
+		joeHackatimeUrl: string | null;
 	}
 
 	interface StatusCounts {
@@ -1833,6 +1837,69 @@
 		return result;
 	});
 
+	// ── Grant cards (bulk card grants) ──
+	// A "grant card" order is one whose item name encodes a dollar value ("$50 Grant").
+	// GRANT_VALUE_RE is declared once near the top of the component.
+	function grantCentsFromName(name: string): number | null {
+		const m = name.match(GRANT_VALUE_RE);
+		return m ? Math.round(parseFloat(m[1]) * 100) : null;
+	}
+	function isGrantOrder(o: AdminOrder): boolean {
+		return grantCentsFromName(o.itemName) !== null;
+	}
+
+	// Auto-sorted queue: pending grant orders that don't have a grant yet.
+	let grantQueue = $derived(
+		filteredFulfillment.filter((o) => o.status === 'pending' && isGrantOrder(o) && !o.hcbCardGrantId)
+	);
+	let grantQueueTotalCents = $derived(
+		grantQueue.reduce((s, o) => s + (grantCentsFromName(o.itemName) ?? 0), 0)
+	);
+
+	// Batch controls: pre-auth is fixed ON server-side; one-time-use is the toggle.
+	let grantBatchOneTimeUse = $state(true);
+	let grantBatchRunning = $state(false);
+	let grantBatchResults = $state<
+		Array<{ orderId: string; itemName: string; ok: boolean; grantId?: string; error?: string }>
+	>([]);
+
+	async function fulfillAllGrants() {
+		if (grantQueue.length === 0) return;
+		const confirmed = confirm(
+			`Issue ${grantQueue.length} REAL card grant(s) totaling ` +
+				`$${(grantQueueTotalCents / 100).toFixed(2)}?\n\n` +
+				`Pre-authorization: required.  One-time use: ${grantBatchOneTimeUse ? 'ON' : 'OFF'}.\n` +
+				`This moves real money and cannot be undone here.`
+		);
+		if (!confirmed) return;
+
+		grantBatchRunning = true;
+		grantBatchResults = [];
+		try {
+			const res = await fetch('/api/admin/hcb/card-grant/bulk', {
+				method: 'POST',
+				headers: { 'Content-Type': 'application/json' },
+				body: JSON.stringify({
+					orderIds: grantQueue.map((o) => o.id),
+					oneTimeUse: grantBatchOneTimeUse
+				})
+			});
+			const body = await res.json().catch(() => ({}));
+			if (res.ok) {
+				grantBatchResults = body.results ?? [];
+				await loadFulfillment(); // refresh — granted orders drop out of the queue
+			} else {
+				grantBatchResults = [
+					{ orderId: '', itemName: '', ok: false, error: body?.message ?? 'Bulk grant failed' }
+				];
+			}
+		} catch {
+			grantBatchResults = [{ orderId: '', itemName: '', ok: false, error: 'Network error' }];
+		} finally {
+			grantBatchRunning = false;
+		}
+	}
+
 	// For each pending order, count other pending orders by the same user for
 	// the same shop item — these are mergeable into one fulfillment.
 	let mergeableCounts = $derived.by(() => {
@@ -2489,6 +2556,49 @@
 					</select>
 				</div>
 
+				{#if hcbStatus?.connected && isSuperAdmin && grantQueue.length > 0}
+					<div class="grant-batch">
+						<div class="grant-batch-head">
+							<h3>Grant cards <span class="grant-batch-count">{grantQueue.length}</span></h3>
+							<p class="grant-batch-sub">
+								Pending orders whose item name carries a dollar value — fulfilled as HCB card grants.
+							</p>
+						</div>
+
+						<ul class="grant-batch-list">
+							{#each grantQueue as o}
+								<li>
+									<span class="grant-batch-item">{o.itemName}</span>
+									<span class="grant-batch-user">{o.userName}{o.userEmail ? ` · ${o.userEmail}` : ''}</span>
+									<span class="grant-batch-amt">${((grantCentsFromName(o.itemName) ?? 0) / 100).toFixed(2)}</span>
+								</li>
+							{/each}
+						</ul>
+
+						<div class="grant-batch-controls">
+							<label class="grant-batch-toggle">
+								<input type="checkbox" bind:checked={grantBatchOneTimeUse} disabled={grantBatchRunning} />
+								One-time use <span class="cg-hint">— card locks after the first transaction</span>
+							</label>
+							<span class="grant-batch-preauth">Pre-authorization: <strong>required</strong></span>
+							<span class="grant-batch-total">Total ${(grantQueueTotalCents / 100).toFixed(2)}</span>
+							<button class="btn btn-primary" onclick={fulfillAllGrants} disabled={grantBatchRunning}>
+								{grantBatchRunning ? 'Issuing…' : `Fulfill all grants (${grantQueue.length})`}
+							</button>
+						</div>
+
+						{#if grantBatchResults.length}
+							<ul class="grant-batch-results">
+								{#each grantBatchResults as r}
+									<li class:ok={r.ok} class:fail={!r.ok}>
+										{r.itemName ? `${r.itemName}: ` : ''}{r.ok ? `✓ ${r.grantId}` : `✗ ${r.error ?? 'failed'}`}
+									</li>
+								{/each}
+							</ul>
+						{/if}
+					</div>
+				{/if}
+
 				{#if fulfillmentLoading}
 					<p class="placeholder">Loading orders...</p>
 				{:else if filteredFulfillment.length === 0}
@@ -2890,6 +3000,37 @@
 										<div class="proj-main-header">
 											<h3 class="proj-main-title">{selectedProject.name}</h3>
 											<span class="badge badge-{selectedProject.status}">{selectedProject.status}</span>
+
+											<div class="joe-link-wrap">
+												{#if selectedProject.joeProfileUrl}
+													<a
+														class="joe-link-btn"
+														href={selectedProject.joeProfileUrl}
+														target="_blank"
+														rel="noopener noreferrer"
+														title="Builder's fraud profile in Joe"
+													>
+														Joe Profile ↗
+													</a>
+												{/if}
+												{#if selectedProject.joeHackatimeUrl}
+													<a
+														class="joe-link-btn joe-link-btn--alt"
+														href={selectedProject.joeHackatimeUrl}
+														target="_blank"
+														rel="noopener noreferrer"
+														title="Hackatime activity for this project in Joe"
+													>
+														Joe Hackatime ↗
+													</a>
+												{/if}
+												{#if !selectedProject.joeProfileUrl && !selectedProject.joeHackatimeUrl}
+													<span class="joe-link-btn joe-link-btn--disabled" title="No Hackatime or Slack identity on file for this builder">
+														No Joe link
+													</span>
+												{/if}
+												<span class="joe-link-note">HQ &amp; Fraud Squad only</span>
+											</div>
 										</div>
 
 										<p class="proj-main-desc">{selectedProject.description}</p>
@@ -4707,6 +4848,51 @@
 		margin-bottom: 0.5rem;
 	}
 
+	.joe-link-wrap {
+		display: inline-flex;
+		align-items: center;
+		gap: 0.5rem;
+		margin-left: auto;
+	}
+
+	.joe-link-btn {
+		display: inline-flex;
+		align-items: center;
+		padding: 0.25rem 0.6rem;
+		font-size: 0.8rem;
+		font-weight: 600;
+		border-radius: 6px;
+		background: #7c3aed;
+		color: #fff;
+		text-decoration: none;
+		white-space: nowrap;
+	}
+
+	.joe-link-btn:hover {
+		background: #6d28d9;
+	}
+
+	.joe-link-btn--alt {
+		background: #0d9488;
+	}
+
+	.joe-link-btn--alt:hover {
+		background: #0f766e;
+	}
+
+	.joe-link-btn--disabled {
+		background: #3a3a3a;
+		color: #888;
+		cursor: not-allowed;
+	}
+
+	.joe-link-note {
+		font-size: 0.7rem;
+		color: #9ca3af;
+		font-style: italic;
+		white-space: nowrap;
+	}
+
 	.proj-main-title {
 		margin: 0;
 		font-size: 1.2rem;
@@ -6403,6 +6589,8 @@
 	.admin-shell.light .proj-main-desc { color: #333; }
 	.admin-shell.light .proj-main-meta { color: #555; }
 	.admin-shell.light .proj-main-meta strong { color: #1a1a1a; }
+	.admin-shell.light .joe-link-btn--disabled { background: #e5e7eb; color: #6b7280; }
+	.admin-shell.light .joe-link-note { color: #6b7280; }
 
 	.admin-shell.light .proj-divider { border-top-color: #666; }
 	.admin-shell.light .proj-screenshot { border-color: #555; }
@@ -6515,6 +6703,38 @@
 
 	/* ── Fulfillment ─────────────────────────────────── */
 	.fulfillment-admin { padding: 0; }
+
+	/* Grant cards (bulk card grants) */
+	.grant-batch {
+		border: 1px solid rgba(124, 58, 237, 0.4);
+		background: rgba(124, 58, 237, 0.08);
+		border-radius: 8px;
+		padding: 0.85rem 1rem;
+		margin-bottom: 1rem;
+	}
+	.grant-batch-head h3 { margin: 0; font-size: 1rem; display: flex; align-items: center; gap: 0.5rem; }
+	.grant-batch-count {
+		background: #7c3aed; color: #fff; font-size: 0.75rem;
+		border-radius: 999px; padding: 0.05rem 0.5rem;
+	}
+	.grant-batch-sub { margin: 0.25rem 0 0.75rem; font-size: 0.8rem; opacity: 0.75; }
+	.grant-batch-list { list-style: none; margin: 0 0 0.75rem; padding: 0; max-height: 220px; overflow-y: auto; }
+	.grant-batch-list li {
+		display: grid; grid-template-columns: 1fr 1fr auto; gap: 0.75rem;
+		padding: 0.3rem 0; border-top: 1px solid rgba(124, 58, 237, 0.18);
+		font-size: 0.82rem; align-items: center;
+	}
+	.grant-batch-list li:first-child { border-top: 0; }
+	.grant-batch-user { opacity: 0.75; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+	.grant-batch-amt { font-variant-numeric: tabular-nums; font-weight: 600; text-align: right; }
+	.grant-batch-controls { display: flex; align-items: center; gap: 1rem; flex-wrap: wrap; }
+	.grant-batch-toggle { display: inline-flex; align-items: center; gap: 0.4rem; font-size: 0.85rem; cursor: pointer; }
+	.grant-batch-preauth { font-size: 0.8rem; opacity: 0.85; }
+	.grant-batch-total { font-size: 0.8rem; font-variant-numeric: tabular-nums; margin-left: auto; }
+	.grant-batch .cg-hint { opacity: 0.6; font-weight: 400; }
+	.grant-batch-results { list-style: none; margin: 0.75rem 0 0; padding: 0; font-size: 0.8rem; }
+	.grant-batch-results li.ok { color: #6bd968; }
+	.grant-batch-results li.fail { color: #ff6b6b; }
 
 	.fulfillment-toolbar {
 		display: flex;

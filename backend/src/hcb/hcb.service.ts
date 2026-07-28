@@ -56,6 +56,16 @@ export type CardGrantPrefill = {
   existingGrantId: string | null;
 };
 
+export type BulkGrantResult = {
+  orderId: string;
+  itemName: string;
+  ok: boolean;
+  grantId?: string;
+  amountCents?: number;
+  error?: string;
+  skipped?: 'not_pending' | 'already_granted' | 'not_a_grant';
+}
+
 @Injectable()
 export class HcbService {
   private readonly logger = new Logger(HcbService.name);
@@ -285,6 +295,14 @@ export class HcbService {
     };
   }
 
+  parseGrantCents(itemName: string | null | undefined): number | null {
+    if (!itemName) return null;
+    const m = itemName.match(/\$\s*(\d+(?:\.\d{1,2})?)/);
+    if (!m) return null;
+    const cents = Math.round(parseFloat(m[1]) * 100);
+    return Number.isFinite(cents) && cents > 0 ? cents : null;
+  } 
+
   private defaultPurpose(itemName: string): string {
     return this.stripDollarAmounts(itemName ?? 'Grant').slice(0, 30);
   }
@@ -323,6 +341,8 @@ export class HcbService {
       throw new ServiceUnavailableException('HCB is not configured');
     }
 
+
+  
     // Validate email + purpose up front (cheap, no lock held).
     const email = (input.email ?? '').trim().toLowerCase();
     if (!EMAIL_RE.test(email)) {
@@ -499,6 +519,55 @@ export class HcbService {
     return { grantId: result.grantId, amountCents: result.amountCents, status: result.status };
   }
 
+  async createGrantForOrders(
+    orderIds: string[],
+    opts: { oneTimeUse?: boolean; preAuthorizationRequired?: boolean },
+    admin: GrantAdmin,
+  ): Promise<{ results: BulkGrantResult[] }> {
+    if (!this.isConfigured || !this.orgId) {
+      throw new ServiceUnavailableException('HCB is not configured');
+    }
+
+    const results: BulkGrantResult[] = [];
+    for (const orderId of orderIds) {
+      const order = await this.orderRepo.findOne({ where: { id: orderId }, relations: ['user'] });
+      if (!order) {
+        results.push({ orderId, itemName: '', ok: false, error: 'Order not found' });
+        continue;
+      }
+      const base = { orderId, itemName: order.itemName };
+
+      if (order.status !== 'pending') {
+        results.push({ ...base, ok: false, skipped: 'not_pending', error: 'Order is not pending' });
+        continue;
+      }
+      if (order.hcbCardGrantId) {
+        results.push({ ...base, ok: false, skipped: 'already_granted', error: `Already granted (${order.hcbCardGrantId})` });
+        continue;
+      }
+
+      const amountCents = this.parseGrantCents(order.itemName) ??
+      (this.centsPerPipe !== undefined ? order.pipesSpent * this.centsPerPipe : null);
+      if (amountCents === null) {
+        results.push({ ...base, ok: false, skipped: 'not_a_grant', error: 'Could not determine grant amount' });
+        continue;
+      }
+
+      try {
+        const res = await this.createCardGrantForOrder(orderId, {
+          amountCents,
+          email: (order.user?.email ?? '').trim().toLowerCase(),
+          purpose: this.defaultPurpose(order.itemName),
+          preAuthorizationRequired: true,      // fixed for the batch
+          oneTimeUse: opts.oneTimeUse,                  // fixed for the batch
+        }, admin);
+        results.push({ ...base, ok: true, grantId: res.grantId, amountCents: res.amountCents });
+      } catch (err) {
+            results.push({ ...base, ok: false, error: err instanceof Error ? err.message : 'Grant failed' });
+      }
+    }
+    return {results};
+  }
   private cleanLock(value: string | null | undefined): string | undefined {
     if (typeof value !== 'string') return undefined;
     const trimmed = value.trim();
