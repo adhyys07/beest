@@ -551,7 +551,10 @@ export class AuditService {
       await this.submissionRepo.save(submission);
     }
 
-    // Grant pipes — delta logic identical to the previous fraud poller path.
+    // Grant pipes — delta logic identical to the fraud poller path. Earned
+    // hours = project override_hours PLUS approved devlog hours (devlog hours
+    // count like normal hours and, like all hours, only mint pipes here at
+    // fraud review).
     if ((project.overrideHours ?? 0) > 0) {
       const totals = await this.projectRepo
         .createQueryBuilder('p')
@@ -562,7 +565,17 @@ export class AuditService {
           `(p.status = 'approved' OR (p.status <> 'approved' AND p.pipes_granted > 0))`,
         )
         .getRawOne<{ earnedHours: string; granted: string }>();
-      const target = Math.floor(Number(totals?.earnedHours ?? 0));
+      const devlogRows: Array<{ h: string }> = await this.projectRepo.manager.query(
+        `SELECT COALESCE(SUM(d.approved_hours), 0) AS h
+           FROM devlogs d
+           JOIN projects p ON p.id = d.project_id
+          WHERE p.user_id = $1
+            AND d.approved = true
+            AND (p.status = 'approved' OR (p.status <> 'approved' AND p.pipes_granted > 0))`,
+        [project.userId],
+      );
+      const devlogHours = Number(devlogRows?.[0]?.h ?? 0);
+      const target = Math.floor(Number(totals?.earnedHours ?? 0) + devlogHours);
       const previouslyGranted = Number(totals?.granted ?? 0);
       const delta = target - previouslyGranted;
       if (delta > 0) {
