@@ -1176,6 +1176,22 @@
 		}
 	}
 
+	async function sendAttendInvite() {
+		if (!selectedUser || !confirm(`Send ${selectedUser.name ?? selectedUser.hcaSub} an Attend invite for the in-person event?`)) return;
+		actionLoading = 'attend-invite';
+		try {
+			const res = await fetch(`/api/admin/users/${selectedUser.id}/attend-invite`, { method: 'POST' });
+			const data = await res.json().catch(() => ({}));
+			if (res.ok && data.success) {
+				alert('Attend invite sent.');
+			} else {
+				alert('Attend invite failed — check the Attend admin panel or try again shortly.');
+			}
+		} finally {
+			actionLoading = '';
+		}
+	}
+
 	async function updatePerms(perms: string) {
 		if (!selectedUser || !confirm(`Change this user's permissions to "${perms}"?`)) return;
 		actionLoading = 'perms';
@@ -2119,6 +2135,10 @@
 										{#if isSuperAdmin}
 											<button class="btn btn-impersonate" onclick={impersonateUser} disabled={actionLoading !== '' || userDetail.perms === 'Banned'}>
 												{actionLoading === 'impersonate' ? 'Starting...' : 'Impersonate'}
+											</button>
+
+											<button class="btn btn-promote" onclick={sendAttendInvite} disabled={actionLoading !== ''} title="Manually (re)send the Attend in-person event invite — use this when an automatic invite failed">
+												{actionLoading === 'attend-invite' ? 'Sending...' : 'Send Attend Invite'}
 											</button>
 										{/if}
 									</div>
