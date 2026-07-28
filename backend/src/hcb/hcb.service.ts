@@ -21,6 +21,15 @@ const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 // Refresh proactively when the access token has under this long to live.
 const EXPIRY_SKEW_MS = 60 * 1000;
 
+// Hardcoded instructions attached to every HCB card grant. HCB shows this on
+// the recipient's grant page (the card_grant.instructions field). Edit this
+// copy to change what every builder sees when they receive a grant.
+const GRANT_INSTRUCTIONS = [
+  'This is your beest reward grant card — use it only for the item you redeemed.',
+  'Upload a receipt in HCB for every transaction, or the charge may be reversed.',
+  'If the card needs pre-authorization it activates once approved. Questions? Ask in the Hack Club Slack.',
+].join('\n');
+
 export type GrantAdmin = { uid: string; email: string };
 
 export type CardGrantInput = {
@@ -429,6 +438,7 @@ export class HcbService {
           email,
           one_time_use: oneTimeUse,
           pre_authorization_required: preAuthorizationRequired,
+          instructions: GRANT_INSTRUCTIONS,
         };
         if (purpose) body.purpose = purpose;
         if (merchantLock) body.merchant_lock = merchantLock;
