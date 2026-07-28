@@ -1860,7 +1860,7 @@
 	let grantBatchOneTimeUse = $state(true);
 	let grantBatchRunning = $state(false);
 	let grantBatchResults = $state<
-		Array<{ orderId: string; itemName: string; ok: boolean; grantId?: string; error?: string }>
+		Array<{ orderId: string; itemName: string; ok: boolean; grantId?: string; error?: string; fulfilled?: boolean }>
 	>([]);
 
 	async function fulfillAllGrants() {
@@ -2591,7 +2591,9 @@
 							<ul class="grant-batch-results">
 								{#each grantBatchResults as r}
 									<li class:ok={r.ok} class:fail={!r.ok}>
-										{r.itemName ? `${r.itemName}: ` : ''}{r.ok ? `✓ ${r.grantId}` : `✗ ${r.error ?? 'failed'}`}
+										{r.itemName ? `${r.itemName}: ` : ''}{r.ok
+											? `✓ ${r.grantId}${r.fulfilled ? ' · fulfilled' : ' · grant issued, order left pending'}`
+											: `✗ ${r.error ?? 'failed'}`}
 									</li>
 								{/each}
 							</ul>

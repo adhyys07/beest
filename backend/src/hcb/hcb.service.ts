@@ -15,6 +15,7 @@ import { HcbCredential } from '../entities/hcb-credential.entity';
 import { Order } from '../entities/order.entity';
 import { User } from '../entities/user.entity';
 import { AuditLogService } from '../audit-log/audit-log.service';
+import { ShopService } from '../shop/shop.service';
 
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 // Refresh proactively when the access token has under this long to live.
@@ -64,6 +65,10 @@ export type BulkGrantResult = {
   amountCents?: number;
   error?: string;
   skipped?: 'not_pending' | 'already_granted' | 'not_a_grant';
+  // True once the order was marked fulfilled after a successful grant. False
+  // means the grant succeeded (money moved) but the fulfill step failed — the
+  // grant is never rolled back for a fulfill failure.
+  fulfilled?: boolean;
 }
 
 @Injectable()
@@ -89,6 +94,7 @@ export class HcbService {
     @InjectRepository(Order)
     private readonly orderRepo: Repository<Order>,
     private readonly auditLogService: AuditLogService,
+    private readonly shopService: ShopService,
   ) {
     this.baseUrl = (this.config.get<string>('HCB_BASE_URL') ?? 'https://hcb.hackclub.com').replace(/\/$/, '');
     this.clientId = this.config.get<string>('HCB_CLIENT_ID')?.trim() || undefined;
@@ -561,7 +567,21 @@ export class HcbService {
           preAuthorizationRequired: true,      // fixed for the batch
           oneTimeUse: opts.oneTimeUse,                  // fixed for the batch
         }, admin);
-        results.push({ ...base, ok: true, grantId: res.grantId, amountCents: res.amountCents });
+
+        // Grant succeeded (money moved) — now mark the order fulfilled. A
+        // fulfill failure must NOT fail the result: the grant already stands.
+        let fulfilled = false;
+        try {
+          await this.shopService.fulfillOrder(orderId);
+          fulfilled = true;
+        } catch (ferrErr) {
+          this.logger.error(
+            `Grant ${res.grantId} issued for order ${orderId} but auto-fulfill failed ` +
+              `(order left pending): ${ferrErr instanceof Error ? ferrErr.message : String(ferrErr)}`,
+          );
+        }
+
+        results.push({ ...base, ok: true, grantId: res.grantId, amountCents: res.amountCents, fulfilled });
       } catch (err) {
             results.push({ ...base, ok: false, error: err instanceof Error ? err.message : 'Grant failed' });
       }
