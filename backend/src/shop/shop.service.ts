@@ -460,6 +460,7 @@ export class ShopService {
     const qb = this.orderRepo
       .createQueryBuilder('order')
       .leftJoinAndSelect('order.user', 'user')
+      .leftJoin('order.shopItem', 'shopItem')
       .select([
         'order.id',
         'order.userId',
@@ -477,6 +478,8 @@ export class ShopService {
         'user.nickname',
         'user.slackId',
         'user.email',
+        'shopItem.id',
+        'shopItem.isGrant',
       ]);
 
     if (options?.shopItemId) {
@@ -507,6 +510,9 @@ export class ShopService {
       status: o.status,
       hcbCardGrantId: o.hcbCardGrantId ?? null,
       siloGrantId: o.siloGrantId ?? null,
+      // Whether this order's item is a grant item — drives the grant options in
+      // the fulfillment dashboard. False if the item was since deleted.
+      isGrant: !!o.shopItem?.isGrant,
       createdAt: o.createdAt,
       updatedAt: o.updatedAt,
       userName: o.user?.nickname || o.user?.name || 'Unknown',

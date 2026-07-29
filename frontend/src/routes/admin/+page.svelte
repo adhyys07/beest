@@ -60,7 +60,6 @@
 		Both: 'Hackathon + Shop',
 	};
 
-	const GRANT_VALUE_RE = /\$\s*(\d+(?:\.\d{1,2})?)/;
 
 	// Fulfiller is reviewer-tier for the tab layout (Projects + Leaderboard, none
 	// of the Super-Admin-only tabs), but additionally gets the Fulfillment tab via
@@ -1554,6 +1553,8 @@
 		isFeatured: boolean;
 		isSuperFeatured: boolean;
 		isBlackMarket: boolean;
+		isGrant: boolean;
+		grantInstructions: string | null;
 		estimatedShip: string | null;
 	}
 	let shopItemsList: ShopItemAdmin[] = $state([]);
@@ -1571,6 +1572,8 @@
 	let newShopFeatured = $state(false);
 	let newShopSuperFeatured = $state(false);
 	let newShopBlackMarket = $state(false);
+	let newShopIsGrant = $state(false);
+	let newShopGrantInstructions = $state('');
 	let dragIdx: number | null = $state(null);
 	let dragOverIdx: number | null = $state(null);
 	// Shop item whose buyer list is open in the ItemBuyersModal, if any.
@@ -1604,7 +1607,9 @@
 					isActive: newShopActive,
 					isFeatured: newShopFeatured,
 					isSuperFeatured: newShopSuperFeatured,
-					isBlackMarket: newShopBlackMarket
+					isBlackMarket: newShopBlackMarket,
+					isGrant: newShopIsGrant,
+					grantInstructions: newShopGrantInstructions.trim() || null
 				})
 			});
 			if (res.ok) {
@@ -1619,6 +1624,8 @@
 				newShopFeatured = false;
 				newShopSuperFeatured = false;
 				newShopBlackMarket = false;
+				newShopIsGrant = false;
+				newShopGrantInstructions = '';
 				await loadShop();
 			}
 		} finally {
@@ -1644,7 +1651,9 @@
 					isActive: editingShop.isActive,
 					isFeatured: editingShop.isFeatured,
 					isSuperFeatured: editingShop.isSuperFeatured,
-					isBlackMarket: editingShop.isBlackMarket
+					isBlackMarket: editingShop.isBlackMarket,
+					isGrant: editingShop.isGrant,
+					grantInstructions: editingShop.grantInstructions
 				})
 			});
 			if (res.ok) {
@@ -1715,6 +1724,7 @@
 		status: string;
 		hcbCardGrantId: string | null;
 		siloGrantId: string | null;
+		isGrant: boolean;
 		createdAt: string;
 		updatedAt: string;
 		userName: string;
@@ -1838,14 +1848,15 @@
 	});
 
 	// ── Grant cards (bulk card grants) ──
-	// A "grant card" order is one whose item name encodes a dollar value ("$50 Grant").
-	// GRANT_VALUE_RE is declared once near the top of the component.
-	function grantCentsFromName(name: string): number | null {
-		const m = name.match(GRANT_VALUE_RE);
-		return m ? Math.round(parseFloat(m[1]) * 100) : null;
+	// A "grant card" order is one whose shop item is flagged as a grant item
+	// (set in the shop panel). The grant amount is pipes spent × $5 (matches the
+	// backend); this is a display estimate — the backend re-computes on issue.
+	const GRANT_CENTS_PER_PIPE = 500;
+	function grantCentsForOrder(o: AdminOrder): number {
+		return o.pipesSpent * GRANT_CENTS_PER_PIPE;
 	}
 	function isGrantOrder(o: AdminOrder): boolean {
-		return grantCentsFromName(o.itemName) !== null;
+		return o.isGrant;
 	}
 
 	// Auto-sorted queue: pending grant orders that don't have a grant yet.
@@ -1853,7 +1864,7 @@
 		filteredFulfillment.filter((o) => o.status === 'pending' && isGrantOrder(o) && !o.hcbCardGrantId)
 	);
 	let grantQueueTotalCents = $derived(
-		grantQueue.reduce((s, o) => s + (grantCentsFromName(o.itemName) ?? 0), 0)
+		grantQueue.reduce((s, o) => s + grantCentsForOrder(o), 0)
 	);
 
 	// Batch controls: pre-auth is fixed ON server-side; one-time-use is the toggle.
@@ -2561,7 +2572,7 @@
 						<div class="grant-batch-head">
 							<h3>Grant cards <span class="grant-batch-count">{grantQueue.length}</span></h3>
 							<p class="grant-batch-sub">
-								Pending orders whose item name carries a dollar value — fulfilled as HCB card grants.
+								Every pending order for a grant-flagged item — review here and send together as HCB card grants.
 							</p>
 						</div>
 
@@ -2570,7 +2581,7 @@
 								<li>
 									<span class="grant-batch-item">{o.itemName}</span>
 									<span class="grant-batch-user">{o.userName}{o.userEmail ? ` · ${o.userEmail}` : ''}</span>
-									<span class="grant-batch-amt">${((grantCentsFromName(o.itemName) ?? 0) / 100).toFixed(2)}</span>
+									<span class="grant-batch-amt">${(grantCentsForOrder(o) / 100).toFixed(2)}</span>
 								</li>
 							{/each}
 						</ul>
@@ -2647,7 +2658,7 @@
 										<button class="btn btn-sm btn-danger" onclick={() => refundOrder(order)} disabled={fulfillmentActionLoading === order.id}>
 											{fulfillmentActionLoading === order.id ? '...' : 'Refund'}
 										</button>
-										{#if hcbStatus?.connected}
+										{#if hcbStatus?.connected && order.isGrant}
 											<button
 												class="btn btn-sm btn-grant"
 												onclick={() => (grantModalOrder = order)}
@@ -2821,6 +2832,16 @@
 								<input type="checkbox" bind:checked={newShopBlackMarket} />
 								<span>Black market (golden-project authors only)</span>
 							</label>
+							<label class="shop-checkbox">
+								<input type="checkbox" bind:checked={newShopIsGrant} />
+								<span>Grant item (fulfilled by issuing an HCB card grant)</span>
+							</label>
+							{#if newShopIsGrant}
+								<label class="shop-field" style="flex-basis:100%">
+									<span>Grant instructions (shown to the recipient on the HCB grant, incl. pre-auth; blank = default)</span>
+									<textarea bind:value={newShopGrantInstructions} class="shop-input shop-textarea" rows="3" placeholder="e.g. Use this grant only for … Upload a receipt in HCB for every purchase."></textarea>
+								</label>
+							{/if}
 							<button class="btn btn-add-shop" onclick={createShopItem} disabled={shopSaving || !newShopName.trim() || !newShopImage.trim() || !newShopPrice}>
 								{shopSaving ? 'Saving...' : 'Add Item'}
 							</button>
@@ -2885,6 +2906,16 @@
 												<input type="checkbox" bind:checked={editingShop.isBlackMarket} />
 												<span>Black market</span>
 											</label>
+											<label class="shop-checkbox">
+												<input type="checkbox" bind:checked={editingShop.isGrant} />
+												<span>Grant item (HCB card grant)</span>
+											</label>
+											{#if editingShop.isGrant}
+												<label class="shop-field" style="flex-basis:100%">
+													<span>Grant instructions (shown to recipient; blank = default)</span>
+													<textarea bind:value={editingShop.grantInstructions} class="shop-input shop-textarea" rows="3" placeholder="Use this grant only for … Upload a receipt in HCB."></textarea>
+												</label>
+											{/if}
 											<div class="shop-edit-actions">
 												<button class="btn btn-save" onclick={saveShopEdit} disabled={shopSaving}>Save</button>
 												<button class="btn btn-cancel" onclick={() => editingShop = null}>Cancel</button>
@@ -2896,7 +2927,7 @@
 										<img src={item.imageUrl} alt={item.name} class="shop-item-thumb" />
 										<div class="shop-item-info">
 											<strong>{item.name}</strong>
-											<span class="shop-item-meta">{item.priceHours}h · {item.stock === null ? '∞' : item.stock} stock{item.estimatedShip ? ` · ${item.estimatedShip}` : ''}{item.isSuperFeatured ? ' · SUPER FEATURED' : ''}{item.isFeatured ? ' · FEATURED' : ''}{item.isBlackMarket ? ' · BLACK MARKET' : ''}{!item.isActive ? ' · HIDDEN' : ''}</span>
+											<span class="shop-item-meta">{item.priceHours}h · {item.stock === null ? '∞' : item.stock} stock{item.estimatedShip ? ` · ${item.estimatedShip}` : ''}{item.isSuperFeatured ? ' · SUPER FEATURED' : ''}{item.isFeatured ? ' · FEATURED' : ''}{item.isBlackMarket ? ' · BLACK MARKET' : ''}{item.isGrant ? ' · GRANT' : ''}{!item.isActive ? ' · HIDDEN' : ''}</span>
 										</div>
 									</div>
 									<div class="shop-item-actions">

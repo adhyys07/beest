@@ -20,15 +20,24 @@ import { ShopService } from '../shop/shop.service';
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 // Refresh proactively when the access token has under this long to live.
 const EXPIRY_SKEW_MS = 60 * 1000;
+// Default grant value: $5 per pipe spent. Used when HCB_CENTS_PER_PIPE is unset.
+const DEFAULT_CENTS_PER_PIPE = 500;
 
-// Hardcoded instructions attached to every HCB card grant. HCB shows this on
-// the recipient's grant page (the card_grant.instructions field). Edit this
-// copy to change what every builder sees when they receive a grant.
-const GRANT_INSTRUCTIONS = [
+// Grant instructions are set per shop item in the shop panel
+// (ShopItem.grantInstructions) and sent to HCB on the card grant (shown to the
+// recipient, incl. during pre-authorization). Items with no instructions set
+// fall back to this default.
+const DEFAULT_GRANT_INSTRUCTIONS = [
   'This is your beest reward grant card — use it only for the item you redeemed.',
   'Upload a receipt in HCB for every transaction, or the charge may be reversed.',
   'If the card needs pre-authorization it activates once approved. Questions? Ask in the Hack Club Slack.',
 ].join('\n');
+
+// The item's own instructions if set, else the default.
+function resolveGrantInstructions(raw: string | null | undefined): string {
+  const text = (raw ?? '').trim();
+  return text || DEFAULT_GRANT_INSTRUCTIONS;
+}
 
 export type GrantAdmin = { uid: string; email: string };
 
@@ -111,11 +120,11 @@ export class HcbService {
     this.redirectUri = this.config.get<string>('HCB_REDIRECT_URI', 'http://localhost:5173/oauth/hcb/callback');
     this.orgId = this.config.get<string>('HCB_ORG_ID')?.trim() || undefined;
     this.jwtSecret = this.config.getOrThrow<string>('JWT_SECRET');
-    // Cents per pipe, e.g. 500 = $5 per pipe. Drives the suggested amount and
-    // the cap (twice the pipe value).
+    // Cents per pipe, e.g. 500 = $5 per pipe. Drives the grant amount, the
+    // suggested amount, and the cap. Defaults to $5/pipe when unset.
     this.centsPerPipe = this.parsePositiveInt(
       this.config.get<string>('HCB_CENTS_PER_PIPE') ?? this.config.get<string>('HCB_PIPES_TO_CENTS'),
-    );
+    ) ?? DEFAULT_CENTS_PER_PIPE;
 
     if (!this.isConfigured) {
       this.logger.warn('HCB card grants disabled — set HCB_CLIENT_ID, HCB_CLIENT_SECRET and HCB_ORG_ID');
@@ -310,14 +319,6 @@ export class HcbService {
     };
   }
 
-  parseGrantCents(itemName: string | null | undefined): number | null {
-    if (!itemName) return null;
-    const m = itemName.match(/\$\s*(\d+(?:\.\d{1,2})?)/);
-    if (!m) return null;
-    const cents = Math.round(parseFloat(m[1]) * 100);
-    return Number.isFinite(cents) && cents > 0 ? cents : null;
-  } 
-
   private defaultPurpose(itemName: string): string {
     return this.stripDollarAmounts(itemName ?? 'Grant').slice(0, 30);
   }
@@ -384,10 +385,14 @@ export class HcbService {
     // so a slightly stale read is fine; the locked re-read still guards money.
     const orderForChecks = await this.orderRepo.findOne({
       where: { id: orderId },
-      relations: ['user'],
+      relations: ['user', 'shopItem'],
     });
     if (!orderForChecks) throw new NotFoundException('Order not found');
     const ownerEmail = (orderForChecks.user?.email ?? '').trim().toLowerCase();
+    // Instructions come from the order's shop item (set in the shop panel).
+    const instructions = resolveGrantInstructions(
+      orderForChecks.shopItem?.grantInstructions,
+    );
 
     // 1) An admin may not issue a grant to their own email.
     if (email === admin.email.trim().toLowerCase()) {
@@ -438,7 +443,7 @@ export class HcbService {
           email,
           one_time_use: oneTimeUse,
           pre_authorization_required: preAuthorizationRequired,
-          instructions: GRANT_INSTRUCTIONS,
+          instructions,
         };
         if (purpose) body.purpose = purpose;
         if (merchantLock) body.merchant_lock = merchantLock;
@@ -546,7 +551,7 @@ export class HcbService {
 
     const results: BulkGrantResult[] = [];
     for (const orderId of orderIds) {
-      const order = await this.orderRepo.findOne({ where: { id: orderId }, relations: ['user'] });
+      const order = await this.orderRepo.findOne({ where: { id: orderId }, relations: ['user', 'shopItem'] });
       if (!order) {
         results.push({ orderId, itemName: '', ok: false, error: 'Order not found' });
         continue;
@@ -561,11 +566,17 @@ export class HcbService {
         results.push({ ...base, ok: false, skipped: 'already_granted', error: `Already granted (${order.hcbCardGrantId})` });
         continue;
       }
+      // Only issue grants for items flagged as grant items in the shop panel.
+      if (!order.shopItem?.isGrant) {
+        results.push({ ...base, ok: false, skipped: 'not_a_grant', error: 'Item is not a grant item' });
+        continue;
+      }
 
-      const amountCents = this.parseGrantCents(order.itemName) ??
-      (this.centsPerPipe !== undefined ? order.pipesSpent * this.centsPerPipe : null);
-      if (amountCents === null) {
-        results.push({ ...base, ok: false, skipped: 'not_a_grant', error: 'Could not determine grant amount' });
+      // Grant amount = pipes spent × the per-pipe rate ($5/pipe by default).
+      const amountCents =
+        this.centsPerPipe !== undefined ? order.pipesSpent * this.centsPerPipe : null;
+      if (amountCents === null || amountCents <= 0) {
+        results.push({ ...base, ok: false, skipped: 'not_a_grant', error: 'Grant amount is zero (no pipes spent)' });
         continue;
       }
 

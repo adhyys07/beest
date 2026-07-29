@@ -2529,6 +2529,8 @@ export class AdminService implements OnApplicationBootstrap {
     isFeatured?: boolean;
     isSuperFeatured?: boolean;
     isBlackMarket?: boolean;
+    isGrant?: boolean;
+    grantInstructions?: string | null;
   }, adminId?: string): Promise<ShopItem> {
     const maxOrder = await this.shopRepo
       .createQueryBuilder('s')
@@ -2548,6 +2550,8 @@ export class AdminService implements OnApplicationBootstrap {
       isFeatured: data.isFeatured ?? false,
       isSuperFeatured: data.isSuperFeatured ?? false,
       isBlackMarket: data.isBlackMarket ?? false,
+      isGrant: data.isGrant ?? false,
+      grantInstructions: data.grantInstructions ?? null,
       sortOrder,
     });
     if (item.isSuperFeatured) {
@@ -2576,6 +2580,8 @@ export class AdminService implements OnApplicationBootstrap {
     isFeatured?: boolean;
     isSuperFeatured?: boolean;
     isBlackMarket?: boolean;
+    isGrant?: boolean;
+    grantInstructions?: string | null;
   }, adminId?: string): Promise<ShopItem> {
     const item = await this.shopRepo.findOne({ where: { id } });
     if (!item) throw new NotFoundException('Shop item not found');
@@ -2610,6 +2616,8 @@ export class AdminService implements OnApplicationBootstrap {
       item.isSuperFeatured = data.isSuperFeatured;
     }
     if (data.isBlackMarket !== undefined) item.isBlackMarket = data.isBlackMarket;
+    if (data.isGrant !== undefined) item.isGrant = data.isGrant;
+    if (data.grantInstructions !== undefined) item.grantInstructions = data.grantInstructions;
     const saved = await this.shopRepo.save(item);
     if (adminId) {
       const detail = changes.length ? ` [${changes.join(', ')}]` : '';
