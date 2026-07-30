@@ -1737,6 +1737,9 @@
 	let fulfillmentItemFilter = $state('');
 	let fulfillmentStatusFilter = $state('pending');
 	let fulfillmentSortBy = $state<'oldest' | 'newest'>('oldest');
+	// Fulfillment splits into two sub-views: the full orders table and a
+	// dedicated bulk card-grant section (Super Admin only).
+	let fulfillmentSubTab = $state<'orders' | 'grants'>('orders');
 	let fulfillmentMsg = $state<Record<string, string>>({});
 	let fulfillmentActionLoading = $state('');
 
@@ -2548,71 +2551,99 @@
 						{/if}
 					</div>
 				{/if}
+				{#if isSuperAdmin}
+					<div class="fulfillment-subtabs">
+						<button class="fulfillment-subtab" class:active={fulfillmentSubTab === 'orders'} onclick={() => fulfillmentSubTab = 'orders'}>
+							Orders
+						</button>
+						<button class="fulfillment-subtab" class:active={fulfillmentSubTab === 'grants'} onclick={() => {
+							fulfillmentSubTab = 'grants';
+							// Grants are always pending; make sure pending orders are loaded even
+							// if the Orders view was left filtered to fulfilled/cancelled.
+							if (fulfillmentStatusFilter && fulfillmentStatusFilter !== 'pending') {
+								fulfillmentStatusFilter = 'pending';
+								loadFulfillment();
+							}
+						}}>
+							Bulk grants
+							{#if grantQueue.length > 0}<span class="subtab-badge">{grantQueue.length}</span>{/if}
+						</button>
+					</div>
+				{/if}
+
 				<div class="fulfillment-toolbar">
-					<select bind:value={fulfillmentStatusFilter} class="users-perms-filter" onchange={() => loadFulfillment()}>
-						<option value="">All Statuses</option>
-						<option value="pending">Pending</option>
-						<option value="fulfilled">Fulfilled</option>
-						<option value="cancelled">Cancelled</option>
-					</select>
+					{#if !(isSuperAdmin && fulfillmentSubTab === 'grants')}
+						<select bind:value={fulfillmentStatusFilter} class="users-perms-filter" onchange={() => loadFulfillment()}>
+							<option value="">All Statuses</option>
+							<option value="pending">Pending</option>
+							<option value="fulfilled">Fulfilled</option>
+							<option value="cancelled">Cancelled</option>
+						</select>
+					{/if}
 					<select bind:value={fulfillmentItemFilter} class="users-perms-filter">
 						<option value="">All Items</option>
 						{#each fulfillmentItemOptions as item}
 							<option value={item}>{item}</option>
 						{/each}
 					</select>
-					<select bind:value={fulfillmentSortBy} class="users-perms-filter" onchange={() => loadFulfillment()}>
-						<option value="oldest">Oldest First</option>
-						<option value="newest">Newest First</option>
-					</select>
+					{#if !(isSuperAdmin && fulfillmentSubTab === 'grants')}
+						<select bind:value={fulfillmentSortBy} class="users-perms-filter" onchange={() => loadFulfillment()}>
+							<option value="oldest">Oldest First</option>
+							<option value="newest">Newest First</option>
+						</select>
+					{/if}
 				</div>
 
-				{#if hcbStatus?.connected && isSuperAdmin && grantQueue.length > 0}
-					<div class="grant-batch">
-						<div class="grant-batch-head">
-							<h3>Grant cards <span class="grant-batch-count">{grantQueue.length}</span></h3>
-							<p class="grant-batch-sub">
-								Every pending order for a grant-flagged item — review here and send together as HCB card grants.
-							</p>
-						</div>
+				{#if isSuperAdmin && fulfillmentSubTab === 'grants'}
+					{#if !hcbStatus?.connected}
+						<p class="placeholder">Connect HCB to issue card grants.</p>
+					{:else if grantQueue.length === 0}
+						<p class="placeholder">No pending grants{fulfillmentItemFilter ? ` for “${fulfillmentItemFilter}”` : ''} right now.</p>
+					{:else}
+						<div class="grant-batch">
+							<div class="grant-batch-head">
+								<h3>Grant cards <span class="grant-batch-count">{grantQueue.length}</span></h3>
+								<p class="grant-batch-sub">
+									Every pending order for a grant-flagged item — review here and send together as HCB card grants.
+								</p>
+							</div>
 
-						<ul class="grant-batch-list">
-							{#each grantQueue as o}
-								<li>
-									<span class="grant-batch-item">{o.itemName}</span>
-									<span class="grant-batch-user">{o.userName}{o.userEmail ? ` · ${o.userEmail}` : ''}</span>
-									<span class="grant-batch-amt">${(grantCentsForOrder(o) / 100).toFixed(2)}</span>
-								</li>
-							{/each}
-						</ul>
-
-						<div class="grant-batch-controls">
-							<label class="grant-batch-toggle">
-								<input type="checkbox" bind:checked={grantBatchOneTimeUse} disabled={grantBatchRunning} />
-								One-time use <span class="cg-hint">— card locks after the first transaction</span>
-							</label>
-							<span class="grant-batch-preauth">Pre-authorization: <strong>required</strong></span>
-							<span class="grant-batch-total">Total ${(grantQueueTotalCents / 100).toFixed(2)}</span>
-							<button class="btn btn-primary" onclick={fulfillAllGrants} disabled={grantBatchRunning}>
-								{grantBatchRunning ? 'Issuing…' : `Fulfill all grants (${grantQueue.length})`}
-							</button>
-						</div>
-
-						{#if grantBatchResults.length}
-							<ul class="grant-batch-results">
-								{#each grantBatchResults as r}
-									<li class:ok={r.ok} class:fail={!r.ok}>
-										{r.itemName ? `${r.itemName}: ` : ''}{r.ok
-											? `✓ ${r.grantId}${r.fulfilled ? ' · fulfilled' : ' · grant issued, order left pending'}`
-											: `✗ ${r.error ?? 'failed'}`}
+							<ul class="grant-batch-list">
+								{#each grantQueue as o}
+									<li>
+										<span class="grant-batch-item">{o.itemName}</span>
+										<span class="grant-batch-user">{o.userName}{o.userEmail ? ` · ${o.userEmail}` : ''}</span>
+										<span class="grant-batch-amt">${(grantCentsForOrder(o) / 100).toFixed(2)}</span>
 									</li>
 								{/each}
 							</ul>
-						{/if}
-					</div>
-				{/if}
 
-				{#if fulfillmentLoading}
+							<div class="grant-batch-controls">
+								<label class="grant-batch-toggle">
+									<input type="checkbox" bind:checked={grantBatchOneTimeUse} disabled={grantBatchRunning} />
+									One-time use <span class="cg-hint">— card locks after the first transaction</span>
+								</label>
+								<span class="grant-batch-preauth">Pre-authorization: <strong>required</strong></span>
+								<span class="grant-batch-total">Total ${(grantQueueTotalCents / 100).toFixed(2)}</span>
+								<button class="btn btn-primary" onclick={fulfillAllGrants} disabled={grantBatchRunning}>
+									{grantBatchRunning ? 'Issuing…' : `Fulfill all grants (${grantQueue.length})`}
+								</button>
+							</div>
+
+							{#if grantBatchResults.length}
+								<ul class="grant-batch-results">
+									{#each grantBatchResults as r}
+										<li class:ok={r.ok} class:fail={!r.ok}>
+											{r.itemName ? `${r.itemName}: ` : ''}{r.ok
+												? `✓ ${r.grantId}${r.fulfilled ? ' · fulfilled' : ' · grant issued, order left pending'}`
+												: `✗ ${r.error ?? 'failed'}`}
+										</li>
+									{/each}
+								</ul>
+							{/if}
+						</div>
+					{/if}
+				{:else if fulfillmentLoading}
 					<p class="placeholder">Loading orders...</p>
 				{:else if filteredFulfillment.length === 0}
 					<p class="placeholder">No orders found.</p>
@@ -6736,6 +6767,30 @@
 
 	/* ── Fulfillment ─────────────────────────────────── */
 	.fulfillment-admin { padding: 0; }
+
+	/* Sub-tabs: Orders | Bulk grants */
+	.fulfillment-subtabs {
+		display: flex; gap: 0.25rem;
+		border-bottom: 1px solid #333;
+		margin-bottom: 1rem;
+	}
+	.fulfillment-subtab {
+		display: inline-flex; align-items: center; gap: 0.4rem;
+		padding: 0.45rem 0.85rem; background: none; border: none;
+		color: #888; cursor: pointer; font-size: 0.88rem;
+		border-bottom: 2px solid transparent; margin-bottom: -1px;
+		transition: color 0.15s, border-color 0.15s;
+	}
+	.fulfillment-subtab:hover { color: #ccc; }
+	.fulfillment-subtab.active { color: #fff; border-bottom-color: #7c3aed; }
+	.subtab-badge {
+		background: #7c3aed; color: #fff; font-size: 0.7rem; font-weight: 600;
+		border-radius: 999px; padding: 0.02rem 0.42rem; line-height: 1.4;
+	}
+	.admin-shell.light .fulfillment-subtabs { border-bottom-color: #d9d3c8; }
+	.admin-shell.light .fulfillment-subtab { color: #666; }
+	.admin-shell.light .fulfillment-subtab:hover { color: #222; }
+	.admin-shell.light .fulfillment-subtab.active { color: #1a1a1a; border-bottom-color: #7c3aed; }
 
 	/* Grant cards (bulk card grants) */
 	.grant-batch {
